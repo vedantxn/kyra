@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The bundled Kyra overlay can access only the application commands it needs.",
+  "windows": ["main"],
+  "permissions": ["core:default", "main-commands"]
+}

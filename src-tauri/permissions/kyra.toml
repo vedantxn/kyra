@@ -1,0 +1,10 @@
+[[permission]]
+identifier = "main-commands"
+description = "Allows the bundled main window to read and update Kyra's local operating state."
+commands.allow = [
+  "get_dashboard",
+  "create_task",
+  "set_loop_status",
+  "create_calendar_block",
+  "hide_overlay"
+]

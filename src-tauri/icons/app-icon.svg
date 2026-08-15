@@ -1,0 +1,21 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(312 204) rotate(54) scale(982)">
+      <stop stop-color="#426F7C"/>
+      <stop offset="0.58" stop-color="#0B3F50"/>
+      <stop offset="1" stop-color="#06232E"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="352" y1="244" x2="698" y2="801" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F2FAF8"/>
+      <stop offset="0.5" stop-color="#93C0BD"/>
+      <stop offset="1" stop-color="#4C7A78"/>
+    </linearGradient>
+    <filter id="shadow" x="184" y="184" width="656" height="656" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <circle cx="512" cy="520" r="238" stroke="#071D26" stroke-opacity="0.32" stroke-width="72" filter="url(#shadow)"/>
+  <circle cx="512" cy="512" r="222" stroke="url(#ring)" stroke-width="70" stroke-linecap="round" stroke-dasharray="116 58"/>
+  <circle cx="512" cy="512" r="120" fill="#092D39" fill-opacity="0.74"/>
+</svg>
