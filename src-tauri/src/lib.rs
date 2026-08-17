@@ -14,6 +14,7 @@ pub struct AppState {
     pool: SqlitePool,
     cipher: crypto::LocalCipher,
     google: Arc<google::GoogleConnector>,
+    ai: Arc<ai::runtime::AiEngine>,
 }
 
 pub fn run() {
@@ -41,12 +42,20 @@ pub fn run() {
         .setup(move |app| {
             let (pool, cipher) = tauri::async_runtime::block_on(db::initialize(app.handle()))?;
             let google = google::GoogleConnector::new(pool.clone());
+            let ai = ai::runtime::AiEngine::new(
+                pool.clone(),
+                cipher.clone(),
+                google.clone(),
+                Some(app.handle().clone()),
+            );
             let scheduled_connector = google.clone();
             app.manage(AppState {
                 pool,
                 cipher,
                 google,
+                ai: ai.clone(),
             });
+            ai.start_scheduler();
             tauri::async_runtime::spawn(async move {
                 let _ = scheduled_connector.sync_now().await;
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
@@ -74,6 +83,12 @@ pub fn run() {
             commands::disconnect_google,
             commands::sync_google_now,
             commands::mutate_google_calendar,
+            commands::get_ai_engine_status,
+            commands::save_ai_provider_config,
+            commands::clear_ai_provider,
+            commands::list_ollama_models,
+            commands::test_ai_provider,
+            commands::run_ai_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyra");

@@ -174,6 +174,22 @@ struct StoredGmailMessage {
     labels: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct AiGmailMessage {
+    pub source_revision_id: String,
+    pub from: String,
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
+    pub body_text: String,
+    pub occurred_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AiThreadSource {
+    pub account_email: String,
+    pub messages: Vec<AiGmailMessage>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredCalendarEvent {
@@ -1288,6 +1304,43 @@ impl GoogleConnector {
                 Ok(stored_event_to_block(event))
             })
             .collect()
+    }
+
+    pub(crate) async fn ai_thread_source(
+        &self,
+        account_id: &str,
+        thread_id: &str,
+    ) -> Result<AiThreadSource, GoogleError> {
+        let account = self.account().await?;
+        if account.id != account_id {
+            return Err(GoogleError::NotConnected);
+        }
+        let key = load_data_key(account_id)?;
+        let account_email: String =
+            decrypt_value(&key, &account.email_nonce, &account.email_ciphertext)?;
+        let rows = sqlx::query_as::<_, (String, Vec<u8>, Vec<u8>)>(
+            "SELECT latest_revision_id, nonce, ciphertext FROM provider_items WHERE account_id = ? AND kind = 'gmail_message' AND thread_id = ? AND latest_revision_id IS NOT NULL ORDER BY occurred_at ASC",
+        )
+        .bind(account_id)
+        .bind(thread_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut messages = Vec::with_capacity(rows.len());
+        for (source_revision_id, nonce, ciphertext) in rows {
+            let message: StoredGmailMessage = decrypt_value(&key, &nonce, &ciphertext)?;
+            messages.push(AiGmailMessage {
+                source_revision_id,
+                from: message.from,
+                to: message.to,
+                cc: message.cc,
+                body_text: message.body_text,
+                occurred_at: message.occurred_at,
+            });
+        }
+        Ok(AiThreadSource {
+            account_email,
+            messages,
+        })
     }
 
     pub async fn mutate_calendar(

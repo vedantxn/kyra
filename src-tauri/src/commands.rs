@@ -5,6 +5,9 @@ use tauri::{Manager, State};
 use uuid::Uuid;
 
 use crate::{
+    ai::types::{
+        ActivationReport, AiEngineStatus, AiProvider, OllamaModel, SaveAiProviderConfigInput,
+    },
     types::{
         CalendarBlock, CalendarMutationInput, CalendarMutationResult, CreateCalendarBlockInput,
         CreateTaskInput, Dashboard, Evidence, GoogleConnectorStatus, GoogleSyncSummary,
@@ -386,6 +389,69 @@ pub async fn mutate_google_calendar(
     state
         .google
         .mutate_calendar(input)
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn get_ai_engine_status(state: State<'_, AppState>) -> Result<AiEngineStatus, String> {
+    state
+        .ai
+        .status()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn save_ai_provider_config(
+    state: State<'_, AppState>,
+    input: SaveAiProviderConfigInput,
+) -> Result<AiEngineStatus, String> {
+    state
+        .ai
+        .save_config(input)
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn clear_ai_provider(
+    state: State<'_, AppState>,
+    provider: AiProvider,
+) -> Result<AiEngineStatus, String> {
+    state
+        .ai
+        .clear_provider(provider)
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn list_ollama_models(
+    state: State<'_, AppState>,
+    base_url: Option<String>,
+) -> Result<Vec<OllamaModel>, String> {
+    state
+        .ai
+        .list_ollama_models(base_url)
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn test_ai_provider(state: State<'_, AppState>) -> Result<ActivationReport, String> {
+    state
+        .ai
+        .activate()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn run_ai_now(state: State<'_, AppState>) -> Result<AiEngineStatus, String> {
+    state
+        .ai
+        .run_now()
         .await
         .map_err(|error| error.public_message())
 }
