@@ -1,5 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
-import { calendarBlockSchema, dashboardSchema, openLoopSchema, type Dashboard, type LoopStatus, type OpenLoop } from "./contracts";
+import {
+  calendarBlockSchema,
+  calendarMutationResultSchema,
+  dashboardSchema,
+  googleConnectorStatusSchema,
+  googleSyncSummarySchema,
+  openLoopSchema,
+  type CalendarMutationInput,
+  type Dashboard,
+  type GoogleConnectorStatus,
+  type LoopStatus,
+  type OpenLoop,
+} from "./contracts";
 import { demoDashboard } from "./demo";
 
 export const isTauri = () => "__TAURI_INTERNALS__" in window;
@@ -35,6 +47,37 @@ export async function createCalendarBlock(title: string, startAt: string, endAt:
     return calendarBlockSchema.parse({ id: crypto.randomUUID(), title, startAt, endAt, kind: "execution", color: "#8ca481" });
   }
   return calendarBlockSchema.parse(await invoke("create_calendar_block", { input: { title, startAt, endAt } }));
+}
+
+const disconnectedStatus: GoogleConnectorStatus = {
+  state: "disconnected",
+  gmailMessageCount: 0,
+  calendarEventCount: 0,
+};
+
+export async function getGoogleConnectorStatus(): Promise<GoogleConnectorStatus> {
+  if (!isTauri()) return googleConnectorStatusSchema.parse(disconnectedStatus);
+  return googleConnectorStatusSchema.parse(await invoke("get_google_connector_status"));
+}
+
+export async function connectGoogle(): Promise<GoogleConnectorStatus> {
+  if (!isTauri()) throw new Error("Google connection is only available in the native Kyra app.");
+  return googleConnectorStatusSchema.parse(await invoke("connect_google"));
+}
+
+export async function disconnectGoogle(): Promise<GoogleConnectorStatus> {
+  if (!isTauri()) return googleConnectorStatusSchema.parse(disconnectedStatus);
+  return googleConnectorStatusSchema.parse(await invoke("disconnect_google"));
+}
+
+export async function syncGoogleNow() {
+  if (!isTauri()) throw new Error("Google connection is only available in the native Kyra app.");
+  return googleSyncSummarySchema.parse(await invoke("sync_google_now"));
+}
+
+export async function mutateGoogleCalendar(input: CalendarMutationInput) {
+  if (!isTauri()) throw new Error("Google Calendar is only available in the native Kyra app.");
+  return calendarMutationResultSchema.parse(await invoke("mutate_google_calendar", { input }));
 }
 
 export async function setLoopStatus(id: string, status: LoopStatus, expectedVersion: number): Promise<OpenLoop> {

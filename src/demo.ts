@@ -69,9 +69,9 @@ export const demoDashboard: Dashboard = {
     },
   ],
   calendarBlocks: [
-    { id: "sleep", title: "Night time", startAt: at(1), endAt: at(8), kind: "routine", color: "#b7b9b2" },
-    { id: "gym", title: "Gym", startAt: at(8, 30), endAt: at(9, 30), kind: "execution", color: "#8ca481" },
-    { id: "meeting", title: "Kyra product review", startAt: at(10), endAt: at(11), kind: "meeting", color: "#b7b9b2" },
-    { id: "deep-work", title: "Build V1 vertical slice", startAt: at(13), endAt: at(16), kind: "execution", color: "#8ca481" },
+    { id: "sleep", title: "Night time", startAt: at(1), endAt: at(8), kind: "routine", color: "#b7b9b2", origin: "demo" },
+    { id: "gym", title: "Gym", startAt: at(8, 30), endAt: at(9, 30), kind: "execution", color: "#8ca481", origin: "demo" },
+    { id: "meeting", title: "Kyra product review", startAt: at(10), endAt: at(11), kind: "meeting", color: "#b7b9b2", origin: "demo" },
+    { id: "deep-work", title: "Build V1 vertical slice", startAt: at(13), endAt: at(16), kind: "execution", color: "#8ca481", origin: "demo" },
   ],
 };

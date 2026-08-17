@@ -1,8 +1,20 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, ChevronDown, Circle, ListTodo, Search, Sparkles, X } from "lucide-react";
-import { createCalendarBlock, createTask, getDashboard, hideOverlay, isTauri, setLoopStatus } from "./api";
+import { CalendarDays, Check, ChevronDown, Circle, Cloud, ListTodo, RefreshCw, Search, Sparkles, Unplug, X } from "lucide-react";
+import {
+  connectGoogle,
+  createCalendarBlock,
+  createTask,
+  disconnectGoogle,
+  getDashboard,
+  getGoogleConnectorStatus,
+  hideOverlay,
+  isTauri,
+  mutateGoogleCalendar,
+  setLoopStatus,
+  syncGoogleNow,
+} from "./api";
 import { parseCommand } from "./command";
-import type { CalendarBlock, Dashboard, OpenLoop } from "./contracts";
+import type { CalendarBlock, Dashboard, GoogleConnectorStatus, OpenLoop } from "./contracts";
 
 const formatDay = (iso: string) => {
   const date = new Date(iso);
@@ -26,6 +38,8 @@ function Logo() {
 
 function Timeline({ blocks, now, onExpand }: { blocks: CalendarBlock[]; now: string; onExpand: () => void }) {
   const hours = [0, 3, 6, 9, 12, 15, 18, 21, 24];
+  const currentDay = new Date(now).toDateString();
+  const todayBlocks = blocks.filter((block) => new Date(block.startAt).toDateString() === currentDay);
   return (
     <section className="timeline-panel" aria-label="Today's calendar">
       <button className="date-button" onClick={onExpand}>
@@ -39,7 +53,7 @@ function Timeline({ blocks, now, onExpand }: { blocks: CalendarBlock[]; now: str
           </div>
         ))}
         <div className="timeline-track" />
-        {blocks.map((block) => {
+        {todayBlocks.map((block) => {
           const top = hourPosition(block.startAt);
           const height = Math.max(1.25, hourPosition(block.endAt) - top);
           return (
@@ -120,10 +134,14 @@ function CommandPalette({
       setMessage(parsed.message);
       return;
     }
-    if (parsed.kind === "task") await onTask(parsed.title);
-    if (parsed.kind === "calendar") await onCalendar(parsed.title, parsed.startAt, parsed.endAt);
-    setMessage(parsed.kind === "task" ? `Added: ${parsed.title}` : `Protected: ${parsed.title}`);
-    setValue("");
+    try {
+      if (parsed.kind === "task") await onTask(parsed.title);
+      if (parsed.kind === "calendar") await onCalendar(parsed.title, parsed.startAt, parsed.endAt);
+      setMessage(parsed.kind === "task" ? `Added: ${parsed.title}` : `Added to Google Calendar: ${parsed.title}`);
+      setValue("");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   return (
@@ -161,7 +179,7 @@ function plannerDate(dayOffset: number, hours: number, minutes = 0) {
   return date.toISOString();
 }
 
-function Planner({ blocks, onClose }: { blocks: CalendarBlock[]; onClose: () => void }) {
+function Planner({ blocks, showDemo, onClose }: { blocks: CalendarBlock[]; showDemo: boolean; onClose: () => void }) {
   const days = Array.from({ length: 3 }, (_, index) => {
     const date = new Date();
     date.setDate(date.getDate() + index);
@@ -169,22 +187,23 @@ function Planner({ blocks, onClose }: { blocks: CalendarBlock[]; onClose: () => 
   });
   const hours = Array.from({ length: 16 }, (_, index) => index + 1);
   const recurring: PlannerBlock[] = days.flatMap((_, plannerDay) => [
-    { id: `sleep-${plannerDay}`, title: "Night time", startAt: plannerDate(plannerDay, 1), endAt: plannerDate(plannerDay, 8), kind: "routine", color: "#b7b9b2", plannerDay },
-    { id: `gym-${plannerDay}`, title: "gym", startAt: plannerDate(plannerDay, 8, plannerDay === 0 ? 45 : 30), endAt: plannerDate(plannerDay, 9, plannerDay === 0 ? 45 : 30), kind: "execution", color: "#8ca481", plannerDay },
+    { id: `sleep-${plannerDay}`, title: "Night time", startAt: plannerDate(plannerDay, 1), endAt: plannerDate(plannerDay, 8), kind: "routine", color: "#b7b9b2", origin: "demo", plannerDay },
+    { id: `gym-${plannerDay}`, title: "gym", startAt: plannerDate(plannerDay, 8, plannerDay === 0 ? 45 : 30), endAt: plannerDate(plannerDay, 9, plannerDay === 0 ? 45 : 30), kind: "execution", color: "#8ca481", origin: "demo", plannerDay },
   ]);
   const supplied: PlannerBlock[] = blocks
     .filter((block) => !/night time|gym/i.test(block.title))
     .map((block) => {
       const blockDate = new Date(block.startAt);
-      const plannerDay = Math.max(0, Math.min(2, Math.round((blockDate.setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86_400_000)));
+      const plannerDay = Math.round((blockDate.setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
       return { ...block, plannerDay };
-    });
+    })
+    .filter((block) => block.plannerDay >= 0 && block.plannerDay <= 2);
   const samples: PlannerBlock[] = [
-    { id: "review-reminder", title: "reminder: meeting w Rajeev", startAt: plannerDate(0, 12), endAt: plannerDate(0, 12, 30), kind: "meeting", color: "#b7b9b2", plannerDay: 0 },
-    { id: "wordware", title: "Maybe: Wordware office visit", startAt: plannerDate(1, 14, 30), endAt: plannerDate(1, 15, 30), kind: "meeting", color: "#b7b9b2", plannerDay: 1 },
-    { id: "aditya", title: "Sahil (Kyra) / Aditya", startAt: plannerDate(2, 10), endAt: plannerDate(2, 10, 30), kind: "meeting", color: "#b7b9b2", plannerDay: 2 },
+    { id: "review-reminder", title: "reminder: meeting w Rajeev", startAt: plannerDate(0, 12), endAt: plannerDate(0, 12, 30), kind: "meeting", color: "#b7b9b2", origin: "demo", plannerDay: 0 },
+    { id: "wordware", title: "Maybe: Wordware office visit", startAt: plannerDate(1, 14, 30), endAt: plannerDate(1, 15, 30), kind: "meeting", color: "#b7b9b2", origin: "demo", plannerDay: 1 },
+    { id: "aditya", title: "Sahil (Kyra) / Aditya", startAt: plannerDate(2, 10), endAt: plannerDate(2, 10, 30), kind: "meeting", color: "#b7b9b2", origin: "demo", plannerDay: 2 },
   ];
-  const plannerBlocks = [...recurring, ...supplied, ...samples];
+  const plannerBlocks = [...(showDemo ? recurring : []), ...supplied, ...(showDemo ? samples : [])];
 
   return (
     <div className="planner-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -222,21 +241,104 @@ function Planner({ blocks, onClose }: { blocks: CalendarBlock[]; onClose: () => 
   );
 }
 
+const connectorLabels: Record<GoogleConnectorStatus["state"], string> = {
+  disconnected: "Not connected",
+  connecting: "Waiting for Google",
+  syncing: "Synchronizing",
+  connected: "Connected",
+  reconnect_required: "Reconnect required",
+  error: "Retry scheduled",
+};
+
+function formatSyncTime(value?: string | null) {
+  if (!value) return "Never";
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+export function ConnectionsSheet({
+  status,
+  busy,
+  error,
+  onClose,
+  onConnect,
+  onSync,
+  onDisconnect,
+}: {
+  status: GoogleConnectorStatus;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onConnect: () => void;
+  onSync: () => void;
+  onDisconnect: () => void;
+}) {
+  const connected = status.state !== "disconnected";
+  return (
+    <div className="connections-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="connections-sheet" aria-label="Connections">
+        <header>
+          <div><span>SETUP</span><h2>Connections</h2></div>
+          <button onClick={onClose} aria-label="Close connections"><X size={17} /></button>
+        </header>
+        <article className="connection-card">
+          <div className="connection-provider"><Cloud size={18} /><div><h3>Google</h3><p>{status.accountEmail ?? "Gmail and primary Calendar"}</p></div><span className={`connection-state ${status.state}`}>{connectorLabels[status.state]}</span></div>
+          {connected ? (
+            <>
+              <dl>
+                <div><dt>Gmail</dt><dd>{status.gmailMessageCount} messages</dd></div>
+                <div><dt>Calendar</dt><dd>{status.calendarEventCount} events</dd></div>
+                <div><dt>Last sync</dt><dd>{formatSyncTime(status.lastSyncAt)}</dd></div>
+              </dl>
+              {(error || status.lastError) && <p className="connection-error">{error || status.lastError}</p>}
+              <div className="connection-actions">
+                {status.state === "reconnect_required" ? <button className="primary" disabled={busy} onClick={onConnect}>Reconnect</button> : <button className="primary" disabled={busy || status.state === "syncing"} onClick={onSync}><RefreshCw size={14} className={busy ? "spinning" : ""} /> Sync now</button>}
+                <button className="disconnect" disabled={busy} onClick={onDisconnect}><Unplug size={14} /> Disconnect</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="connection-copy">Synchronize the last 30 days of Inbox and Sent mail, and use Kyra as a real Google Calendar client. Provider content stays encrypted on this Mac.</p>
+              {error && <p className="connection-error">{error}</p>}
+              <button className="connect-button" disabled={busy} onClick={onConnect}>{busy ? "Waiting for Google…" : "Connect Google"}</button>
+              <small>Google opens in your browser. Kyra never stores a client secret.</small>
+            </>
+          )}
+        </article>
+      </section>
+    </div>
+  );
+}
+
 export default function App() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [plannerOpen, setPlannerOpen] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [connector, setConnector] = useState<GoogleConnectorStatus>({ state: "disconnected", gmailMessageCount: 0, calendarEventCount: 0 });
+  const [connectorBusy, setConnectorBusy] = useState(false);
+  const [connectorError, setConnectorError] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getDashboard().then(setDashboard).catch((cause) => setError(String(cause)));
+    const load = () => {
+      void Promise.all([getDashboard(), getGoogleConnectorStatus()])
+        .then(([nextDashboard, nextConnector]) => { setDashboard(nextDashboard); setConnector(nextConnector); })
+        .catch((cause) => setError(String(cause)));
+    };
+    load();
+    const refresh = window.setInterval(load, 30_000);
+    return () => window.clearInterval(refresh);
+  }, []);
+
+  useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (plannerOpen) setPlannerOpen(false);
+      if (connectionsOpen) setConnectionsOpen(false);
+      else if (plannerOpen) setPlannerOpen(false);
       else void hideOverlay();
     };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
-  }, [plannerOpen]);
+  }, [connectionsOpen, plannerOpen]);
 
   const visibleLoops = useMemo(
     () => dashboard?.openLoops.filter((loop) => loop.status !== "done" && loop.status !== "dismissed") ?? [],
@@ -250,9 +352,74 @@ export default function App() {
   };
 
   const addCalendar = async (title: string, startAt: string, endAt: string) => {
-    const block = await createCalendarBlock(title, startAt, endAt);
-    if (isTauri()) setDashboard(await getDashboard());
-    else setDashboard((current) => current ? { ...current, calendarBlocks: [...current.calendarBlocks, block] } : current);
+    if (isTauri()) {
+      if (connector.state !== "connected") throw new Error("Connect Google Calendar before using /cal.");
+      await mutateGoogleCalendar({
+        action: "create",
+        operationId: crypto.randomUUID(),
+        event: {
+          title,
+          when: { kind: "timed", startAt, endAt, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+          attendees: [],
+          recurrence: [],
+          sendUpdates: "all",
+        },
+      });
+      setDashboard(await getDashboard());
+    } else {
+      const block = await createCalendarBlock(title, startAt, endAt);
+      setDashboard((current) => current ? { ...current, calendarBlocks: [...current.calendarBlocks, block] } : current);
+    }
+  };
+
+  const refreshNativeState = async () => {
+    const [nextDashboard, nextConnector] = await Promise.all([getDashboard(), getGoogleConnectorStatus()]);
+    setDashboard(nextDashboard);
+    setConnector(nextConnector);
+  };
+
+  const connect = async () => {
+    setConnectorBusy(true);
+    setConnectorError("");
+    setConnector((current) => ({ ...current, state: "connecting" }));
+    try {
+      setConnector(await connectGoogle());
+      await refreshNativeState();
+    } catch (cause) {
+      setConnectorError(cause instanceof Error ? cause.message : String(cause));
+      setConnector(await getGoogleConnectorStatus());
+    } finally {
+      setConnectorBusy(false);
+    }
+  };
+
+  const syncConnector = async () => {
+    setConnectorBusy(true);
+    setConnectorError("");
+    setConnector((current) => ({ ...current, state: "syncing" }));
+    try {
+      await syncGoogleNow();
+      await refreshNativeState();
+    } catch (cause) {
+      setConnectorError(cause instanceof Error ? cause.message : String(cause));
+      setConnector(await getGoogleConnectorStatus());
+    } finally {
+      setConnectorBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    if (!window.confirm("Disconnect Google and remove its synchronized data from this Mac?")) return;
+    setConnectorBusy(true);
+    setConnectorError("");
+    try {
+      setConnector(await disconnectGoogle());
+      await refreshNativeState();
+    } catch (cause) {
+      setConnectorError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setConnectorBusy(false);
+    }
   };
 
   const complete = async (loop: OpenLoop) => {
@@ -280,8 +447,9 @@ export default function App() {
       </section>
       <Loops loops={dashboard.openLoops} onComplete={complete} />
       <span className="loop-count">{37 + Math.max(0, visibleLoops.length - 5)}</span>
-      <div className="status-dot" title="Kyra is connected" />
-      {plannerOpen && <Planner blocks={dashboard.calendarBlocks} onClose={() => setPlannerOpen(false)} />}
+      <button className={`status-dot ${connector.state}`} title={`Google: ${connectorLabels[connector.state]}`} aria-label="Open connections" onClick={() => setConnectionsOpen(true)} />
+      {plannerOpen && <Planner blocks={dashboard.calendarBlocks} showDemo={connector.state === "disconnected"} onClose={() => setPlannerOpen(false)} />}
+      {connectionsOpen && <ConnectionsSheet status={connector} busy={connectorBusy} error={connectorError} onClose={() => setConnectionsOpen(false)} onConnect={() => void connect()} onSync={() => void syncConnector()} onDisconnect={() => void disconnect()} />}
     </main>
   );
 }
