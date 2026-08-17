@@ -876,7 +876,8 @@ impl AiEngine {
         let rows = sqlx::query_as::<_, (String, String, String, Vec<u8>, Vec<u8>, String)>("SELECT id, kind, status, payload_nonce, payload_ciphertext, created_at FROM ai_actions ORDER BY created_at DESC LIMIT 100")
             .fetch_all(&self.pool)
             .await?;
-        rows.into_iter()
+        let mut activity = rows
+            .into_iter()
             .map(|(id, kind, status, nonce, ciphertext, created_at)| {
                 let payload: ActionRecord = self.cipher.decrypt(&nonce, &ciphertext)?;
                 let compensation = kind.starts_with("calendar_");
@@ -892,7 +893,36 @@ impl AiEngine {
                     created_at,
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>, EngineError>>()?;
+        let failed_jobs = sqlx::query_as::<_, (String, String, String, Option<String>, String)>(
+            "SELECT id, kind, status, last_error_code, created_at FROM ai_jobs WHERE status IN ('failed', 'dead_letter') ORDER BY created_at DESC LIMIT 100",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        activity.extend(failed_jobs.into_iter().map(
+            |(id, job_kind, status, error_code, created_at)| {
+                AiActivityItem {
+                    id,
+                    kind: "job".to_owned(),
+                    status,
+                    title: match job_kind.as_str() {
+                        "extract_thread" => "Email analysis needs attention",
+                        "reconcile_generation" => "Open-loop reconciliation needs attention",
+                        "compose_briefing" => "Night briefing needs attention",
+                        _ => "AI job needs attention",
+                    }
+                    .to_owned(),
+                    detail: safe_job_error(error_code.as_deref()),
+                    can_revert: false,
+                    compensation: false,
+                    irreversible_effects: Vec::new(),
+                    created_at,
+                }
+            },
+        ));
+        activity.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        activity.truncate(100);
+        Ok(activity)
     }
 
     pub(super) async fn resolve_review_policy(
@@ -1447,6 +1477,33 @@ fn stable_action_id(
 ) -> String {
     let stable = cipher.pseudonymous_id("ai-action", &format!("{kind}:{target}:{model_run_id}"));
     format!("action_{}", &stable[..24])
+}
+
+fn safe_job_error(code: Option<&str>) -> String {
+    match code.unwrap_or("unknown") {
+        "authentication" => {
+            "The saved provider credential was rejected. Reconnect the model provider, then retry."
+                .to_owned()
+        }
+        "rate_limited" => {
+            "The provider asked Kyra to slow down. The job can be retried after the backoff window."
+                .to_owned()
+        }
+        "timeout" => "The model did not respond within the 90-second limit.".to_owned(),
+        "invalid_output" => {
+            "The model twice returned a result that did not satisfy Kyra's strict schema."
+                .to_owned()
+        }
+        "lease_expired" => {
+            "Kyra closed or slept while this job was running. It is safe to retry.".to_owned()
+        }
+        "fenced" => "The source, account, or active model changed before this result could commit."
+            .to_owned(),
+        "refusal" => "The provider declined to analyze this item.".to_owned(),
+        "unavailable" => "The provider was unavailable after bounded retries.".to_owned(),
+        _ => "The job could not finish. Retry it, or inspect the active provider connection."
+            .to_owned(),
+    }
 }
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::Mutex,
-    time::timeout,
+    time::{sleep, timeout},
 };
 use url::Url;
 use uuid::Uuid;
@@ -565,13 +565,35 @@ impl GoogleConnector {
     async fn remove_account(&self, account_id: &str) -> Result<(), GoogleError> {
         let cleanup_id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
-        let mut transaction = self.pool.begin().await?;
+        let mut fence = self.pool.begin().await?;
         sqlx::query("UPDATE connector_accounts SET generation = generation + 1, updated_at = ? WHERE id = ?")
             .bind(&now)
             .bind(account_id)
-            .execute(&mut *transaction)
+            .execute(&mut *fence)
             .await?;
-        sqlx::query("UPDATE ai_jobs SET status = 'cancelled', lease_owner = NULL, lease_token = NULL, leased_until = NULL, updated_at = ? WHERE account_id = ? AND status IN ('queued', 'leased', 'failed')")
+        sqlx::query("UPDATE ai_jobs SET status = 'cancelled', lease_owner = NULL, lease_token = NULL, leased_until = NULL, updated_at = ? WHERE account_id = ? AND status IN ('queued', 'failed')")
+            .bind(&now)
+            .bind(account_id)
+            .execute(&mut *fence)
+            .await?;
+        fence.commit().await?;
+
+        let drain_deadline = tokio::time::Instant::now() + StdDuration::from_secs(5);
+        loop {
+            let active: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM ai_jobs WHERE account_id = ? AND status = 'leased'",
+            )
+            .bind(account_id)
+            .fetch_one(&self.pool)
+            .await?;
+            if active == 0 || tokio::time::Instant::now() >= drain_deadline {
+                break;
+            }
+            sleep(StdDuration::from_millis(100)).await;
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("UPDATE ai_jobs SET status = 'cancelled', lease_owner = NULL, lease_token = NULL, leased_until = NULL, updated_at = ? WHERE account_id = ? AND status = 'leased'")
             .bind(&now)
             .bind(account_id)
             .execute(&mut *transaction)
