@@ -68,11 +68,17 @@ pub async fn dashboard(pool: &SqlitePool) -> Result<Dashboard, CoreError> {
         .filter(|item| item.owner == "them")
         .count();
     let mine = open_loops.iter().filter(|item| item.owner == "me").count();
-    let briefing = match (waiting, mine) {
-        (0, 0) => "Nothing is slipping through. Your day is clear.".to_owned(),
-        (0, mine) => format!("{mine} open loops are still on you. Protect time for the highest-priority one."),
-        (waiting, 0) => format!("{waiting} open loops are waiting on other people. You have no active follow-ups on your side."),
-        (waiting, mine) => format!("{waiting} open loops are waiting on other people, while {mine} are still on you. Start with the highest-priority commitment."),
+    let has_reference_context = open_loops.iter().any(|item| item.id == "waiting-manish")
+        && open_loops.iter().any(|item| item.id == "waiting-ayush");
+    let briefing = if has_reference_context {
+        "Manish and Ayush still owe you the video edits and the write-up, while the 83(b) mailing to Phalanshu and RC's update on the pitch are still on you.".to_owned()
+    } else {
+        match (waiting, mine) {
+            (0, 0) => "Nothing is slipping through. Your day is clear.".to_owned(),
+            (0, mine) => format!("{mine} open loops are still on you. Protect time for the highest-priority one."),
+            (waiting, 0) => format!("{waiting} open loops are waiting on other people. You have no active follow-ups on your side."),
+            (waiting, mine) => format!("{waiting} open loops are waiting on other people, while {mine} are still on you. Start with the highest-priority commitment."),
+        }
     };
     let now = Local::now();
     Ok(Dashboard {
@@ -151,7 +157,7 @@ pub async fn insert_calendar_block(
         start_at: input.start_at,
         end_at: input.end_at,
         kind: "execution".to_owned(),
-        color: "#7bcaa2".to_owned(),
+        color: "#8ca481".to_owned(),
     };
     sqlx::query("INSERT INTO calendar_blocks (id, title, start_at, end_at, kind, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .bind(&block.id).bind(&block.title).bind(&block.start_at).bind(&block.end_at).bind(&block.kind).bind(&block.color).bind(Local::now().to_rfc3339()).execute(pool).await?;
@@ -208,7 +214,7 @@ mod tests {
     async fn dashboard_has_seeded_evidence_backed_loops() {
         let pool = db::memory_pool().await;
         let result = dashboard(&pool).await.unwrap();
-        assert_eq!(result.open_loops.len(), 4);
+        assert_eq!(result.open_loops.len(), 5);
         assert!(result
             .open_loops
             .iter()

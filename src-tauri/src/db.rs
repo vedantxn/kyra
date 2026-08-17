@@ -11,7 +11,7 @@ pub async fn initialize(app: &AppHandle) -> Result<SqlitePool, Box<dyn std::erro
     let app_data = app.path().app_data_dir()?;
     fs::create_dir_all(&app_data)?;
     let options = SqliteConnectOptions::new()
-        .filename(app_data.join("kyra-v1.sqlite3"))
+        .filename(app_data.join("kyra-v1-visual.sqlite3"))
         .create_if_missing(true)
         .foreign_keys(true)
         .journal_mode(SqliteJournalMode::Wal);
@@ -64,7 +64,7 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         (
             "waiting-manish",
             "Waiting on Manish for the video edits",
-            "You followed up, and Manish said his editor started and would send a few by morning.",
+            "You followed up asking why you haven't gotten any edited videos, and Manish said his editor just started and will send a few by morning.",
             "them",
             "waiting",
             95_i64,
@@ -73,7 +73,7 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         (
             "waiting-ayush",
             "Waiting on Ayush for the write-up",
-            "Ayush promised the write-up for today, but it has not arrived yet.",
+            "You pushed Ayush hard for the write-up and asked him to send it by tomorrow; he said he'd send it and add more new stuff, but it hasn't arrived yet.",
             "them",
             "waiting",
             90,
@@ -81,17 +81,26 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ),
         (
             "mail-receipt",
-            "Mail the signed form and send the receipt",
-            "You said you would mail the form and keep the receipt as proof.",
+            "Print, sign, mail the 83(b) form via USPS and send Phalanshu the receipt",
+            "You told Phalanshu you'd do the 83(b) mailing, and he reminded you to keep the USPS receipt as proof — this is still pending on your end.",
             "me",
             "open",
             86,
             Some(at(17, 0)),
         ),
         (
+            "samarth-sign-doc",
+            "Samarth to sign the doc tonight",
+            "You asked Samarth to sign and he said he'd do it tonight, so you're waiting on him.",
+            "them",
+            "waiting",
+            82,
+            Some(at(23, 0)),
+        ),
+        (
             "update-rc",
-            "Update RC on how the pitch went",
-            "RC asked how it went; you still have not shared the outcome.",
+            "Update RC on how the pitch/meeting went",
+            "RC asked how it went and you only said it's in 20 mins — you still haven't told him the outcome.",
             "me",
             "open",
             78,
@@ -128,6 +137,13 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ),
         (
             "e4",
+            "samarth-sign-doc",
+            "fixture_message",
+            "Message with Samarth",
+            "I'll sign it tonight.",
+        ),
+        (
+            "e5",
             "update-rc",
             "fixture_message",
             "Message with RC",
@@ -147,16 +163,16 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             at(1, 0),
             at(8, 0),
             "routine",
-            "#a8c7ee",
+            "#b7b9b2",
         ),
-        ("gym", "Gym", at(8, 30), at(9, 30), "execution", "#7bcaa2"),
+        ("gym", "Gym", at(8, 30), at(9, 30), "execution", "#8ca481"),
         (
             "meeting",
             "Kyra product review",
             at(10, 0),
             at(11, 0),
             "meeting",
-            "#8eb8ec",
+            "#b7b9b2",
         ),
         (
             "deep-work",
@@ -164,7 +180,7 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             at(13, 0),
             at(16, 0),
             "execution",
-            "#86c998",
+            "#8ca481",
         ),
     ];
     for (id, title, start_at, end_at, kind, color) in blocks {
