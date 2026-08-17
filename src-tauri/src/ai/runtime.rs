@@ -322,17 +322,23 @@ impl AiEngine {
         .await;
         match result {
             Ok(report) if report.passed => {
-                let expires_at = activated_at + Duration::days(7);
-                sqlx::query("UPDATE ai_provider_configs SET state = 'ready', activation_fingerprint = ?, activated_model = ?, activated_at = ?, activation_expires_at = ?, last_error_code = NULL, updated_at = ? WHERE provider = ? AND config_generation = ?")
+                let expires_at = config
+                    .provider()?
+                    .is_cloud()
+                    .then(|| activated_at + Duration::days(7));
+                let updated = sqlx::query("UPDATE ai_provider_configs SET state = 'ready', activation_fingerprint = ?, activated_model = ?, activated_at = ?, activation_expires_at = ?, last_error_code = NULL, updated_at = ? WHERE provider = ? AND config_generation = ? AND selected = 1 AND state = 'testing'")
                     .bind(&report.fingerprint)
                     .bind(&report.resolved_model)
                     .bind(activated_at.to_rfc3339())
-                    .bind(expires_at.to_rfc3339())
+                    .bind(expires_at.map(|value| value.to_rfc3339()))
                     .bind(activated_at.to_rfc3339())
                     .bind(&config.provider)
                     .bind(config.config_generation)
                     .execute(&self.pool)
                     .await?;
+                if updated.rows_affected() != 1 {
+                    return Err(EngineError::Fenced);
+                }
                 self.source_sweep().await?;
                 self.emit("ai-engine-state-changed", &()).await;
                 Ok(report)
