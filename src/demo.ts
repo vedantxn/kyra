@@ -10,12 +10,12 @@ const at = (hours: number, minutes = 0, dayOffset = 0) => {
 export const demoDashboard: Dashboard = {
   today: now.toISOString(),
   now: now.toISOString(),
-  briefing: "Manish and Ayush still owe you the video edits and write-up. The mailing receipt and RC's update are still on you.",
+  briefing: "Manish and Ayush still owe you the video edits and the write-up, while the 83(b) mailing to Phalanshu and RC's update on the pitch are still on you.",
   openLoops: [
     {
       id: "waiting-manish",
       title: "Waiting on Manish for the video edits",
-      summary: "You followed up, and Manish said his editor started and would send a few by morning.",
+      summary: "You followed up asking why you haven't gotten any edited videos, and Manish said his editor just started and will send a few by morning.",
       owner: "them",
       status: "waiting",
       priority: 95,
@@ -26,7 +26,7 @@ export const demoDashboard: Dashboard = {
     {
       id: "waiting-ayush",
       title: "Waiting on Ayush for the write-up",
-      summary: "Ayush promised the write-up for today, but it has not arrived yet.",
+      summary: "You pushed Ayush hard for the write-up and asked him to send it by tomorrow; he said he'd send it and add more new stuff, but it hasn't arrived yet.",
       owner: "them",
       status: "waiting",
       priority: 90,
@@ -36,8 +36,8 @@ export const demoDashboard: Dashboard = {
     },
     {
       id: "mail-receipt",
-      title: "Mail the signed form and send the receipt",
-      summary: "You said you would mail the form and keep the receipt as proof.",
+      title: "Print, sign, mail the 83(b) form via USPS and send Phalanshu the receipt",
+      summary: "You told Phalanshu you'd do the 83(b) mailing, and he reminded you to keep the USPS receipt as proof — this is still pending on your end.",
       owner: "me",
       status: "open",
       priority: 86,
@@ -46,9 +46,20 @@ export const demoDashboard: Dashboard = {
       evidence: [{ id: "e3", sourceKind: "gmail", sourceLabel: "Email from Phalanshu", excerpt: "Please keep the USPS receipt as proof.", occurredAt: at(19, 40, -1) }],
     },
     {
+      id: "samarth-sign-doc",
+      title: "Samarth to sign the doc tonight",
+      summary: "You asked Samarth to sign and he said he'd do it tonight, so you're waiting on him.",
+      owner: "them",
+      status: "waiting",
+      priority: 82,
+      dueAt: at(23),
+      version: 1,
+      evidence: [{ id: "e5", sourceKind: "fixture_message", sourceLabel: "Message with Samarth", excerpt: "I'll sign it tonight.", occurredAt: at(20, 5, -1) }],
+    },
+    {
       id: "update-rc",
-      title: "Update RC on how the pitch went",
-      summary: "RC asked how it went; you still have not shared the outcome.",
+      title: "Update RC on how the pitch/meeting went",
+      summary: "RC asked how it went and you only said it's in 20 mins — you still haven't told him the outcome.",
       owner: "me",
       status: "open",
       priority: 78,
@@ -58,9 +69,9 @@ export const demoDashboard: Dashboard = {
     },
   ],
   calendarBlocks: [
-    { id: "sleep", title: "Night time", startAt: at(1), endAt: at(8), kind: "routine", color: "#a8c7ee" },
-    { id: "gym", title: "Gym", startAt: at(8, 30), endAt: at(9, 30), kind: "execution", color: "#7bcaa2" },
-    { id: "meeting", title: "Kyra product review", startAt: at(10), endAt: at(11), kind: "meeting", color: "#8eb8ec" },
-    { id: "deep-work", title: "Build V1 vertical slice", startAt: at(13), endAt: at(16), kind: "execution", color: "#86c998" },
+    { id: "sleep", title: "Night time", startAt: at(1), endAt: at(8), kind: "routine", color: "#b7b9b2" },
+    { id: "gym", title: "Gym", startAt: at(8, 30), endAt: at(9, 30), kind: "execution", color: "#8ca481" },
+    { id: "meeting", title: "Kyra product review", startAt: at(10), endAt: at(11), kind: "meeting", color: "#b7b9b2" },
+    { id: "deep-work", title: "Build V1 vertical slice", startAt: at(13), endAt: at(16), kind: "execution", color: "#8ca481" },
   ],
 };

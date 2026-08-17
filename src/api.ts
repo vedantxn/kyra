@@ -32,7 +32,7 @@ export async function createTask(title: string): Promise<OpenLoop> {
 
 export async function createCalendarBlock(title: string, startAt: string, endAt: string) {
   if (!isTauri()) {
-    return calendarBlockSchema.parse({ id: crypto.randomUUID(), title, startAt, endAt, kind: "execution", color: "#7bcaa2" });
+    return calendarBlockSchema.parse({ id: crypto.randomUUID(), title, startAt, endAt, kind: "execution", color: "#8ca481" });
   }
   return calendarBlockSchema.parse(await invoke("create_calendar_block", { input: { title, startAt, endAt } }));
 }
