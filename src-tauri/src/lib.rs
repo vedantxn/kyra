@@ -36,6 +36,10 @@ pub fn run() {
             let pool = tauri::async_runtime::block_on(db::initialize(app.handle()))?;
             app.manage(AppState { pool });
             app.global_shortcut().register(command_k)?;
+            if let Some(window) = app.get_webview_window("main") {
+                window.show()?;
+                window.set_focus()?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

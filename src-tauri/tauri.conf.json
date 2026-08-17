@@ -37,6 +37,9 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "category": "Productivity",
     "shortDescription": "Close the right loops at the right time.",
     "longDescription": "Kyra turns commitments found in your communications and calendar into evidence-backed open loops and a focused daily plan."
