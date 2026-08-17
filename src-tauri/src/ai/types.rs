@@ -53,6 +53,73 @@ pub struct AiEngineStatus {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AiCommandInput {
+    pub text: String,
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AiCommandResult {
+    Executed {
+        action_ids: Vec<String>,
+    },
+    ClarificationRequired {
+        session_id: String,
+        question: String,
+        expires_at: String,
+    },
+    ReviewCreated {
+        review_id: String,
+    },
+    NoAction {
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiReviewItem {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub summary: String,
+    pub evidence: Vec<String>,
+    pub irreversible_effects: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolveAiReviewInput {
+    pub review_id: String,
+    pub decision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiActivityItem {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub title: String,
+    pub detail: String,
+    pub can_revert: bool,
+    pub compensation: bool,
+    pub irreversible_effects: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertAiActionResult {
+    pub action_id: String,
+    pub status: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EvidenceReference {

@@ -97,7 +97,7 @@ pub fn canonicalize_thread(
 }
 
 pub fn redact_known_aliases(
-    cipher: &LocalCipher,
+    _cipher: &LocalCipher,
     text: &str,
     aliases: &HashMap<String, String>,
 ) -> String {
@@ -109,8 +109,10 @@ pub fn redact_known_aliases(
             if alias.trim().is_empty() {
                 output
             } else {
-                let token = format!("[person:{}]", stable_person_token(cipher, person_id));
-                output.replace(alias, &token)
+                let token = format!("[person:{person_id}]");
+                Regex::new(&format!("(?i){}", regex::escape(alias)))
+                    .map(|pattern| pattern.replace_all(&output, token.as_str()).into_owned())
+                    .unwrap_or(output)
             }
         })
 }
@@ -158,10 +160,6 @@ fn redact_emails(cipher: &LocalCipher, text: &str) -> String {
             )
         })
         .into_owned()
-}
-
-fn stable_person_token(cipher: &LocalCipher, person_id: &str) -> String {
-    cipher.pseudonymous_id("cloud-person-id", person_id)[..16].to_owned()
 }
 
 #[cfg(test)]

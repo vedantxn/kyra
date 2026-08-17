@@ -192,6 +192,22 @@ pub(crate) struct AiThreadSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct AiCalendarSnapshot {
+    pub id: String,
+    pub etag: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub start_at: String,
+    pub end_at: String,
+    pub all_day: bool,
+    pub time_zone: Option<String>,
+    pub attendees: Vec<String>,
+    pub recurrence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct StoredCalendarEvent {
     id: String,
     etag: String,
@@ -1340,6 +1356,42 @@ impl GoogleConnector {
         Ok(AiThreadSource {
             account_email,
             messages,
+        })
+    }
+
+    pub(crate) async fn ai_calendar_snapshot(
+        &self,
+        account_id: &str,
+        event_id: &str,
+    ) -> Result<AiCalendarSnapshot, GoogleError> {
+        let account = self.account().await?;
+        if account.id != account_id {
+            return Err(GoogleError::NotConnected);
+        }
+        let key = load_data_key(account_id)?;
+        let row = sqlx::query_as::<_, (Vec<u8>, Vec<u8>)>(
+            "SELECT nonce, ciphertext FROM provider_items WHERE account_id = ? AND kind = 'calendar_event' AND external_id = ?",
+        )
+        .bind(account_id)
+        .bind(event_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(GoogleError::Validation(
+            "That Calendar event is no longer available.".to_owned(),
+        ))?;
+        let event: StoredCalendarEvent = decrypt_value(&key, &row.0, &row.1)?;
+        Ok(AiCalendarSnapshot {
+            id: event.id,
+            etag: event.etag,
+            title: event.title,
+            description: event.description,
+            location: event.location,
+            start_at: event.start_at,
+            end_at: event.end_at,
+            all_day: event.all_day,
+            time_zone: event.time_zone,
+            attendees: event.attendees,
+            recurrence: event.recurrence,
         })
     }
 

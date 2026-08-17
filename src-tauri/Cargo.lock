@@ -2543,6 +2543,7 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "html2text",
+ "iana-time-zone",
  "keyring",
  "regex",
  "reqwest",

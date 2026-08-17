@@ -6,7 +6,9 @@ use uuid::Uuid;
 
 use crate::{
     ai::types::{
-        ActivationReport, AiEngineStatus, AiProvider, OllamaModel, SaveAiProviderConfigInput,
+        ActivationReport, AiActivityItem, AiCommandInput, AiCommandResult, AiEngineStatus,
+        AiProvider, AiReviewItem, OllamaModel, ResolveAiReviewInput, RevertAiActionResult,
+        SaveAiProviderConfigInput,
     },
     types::{
         CalendarBlock, CalendarMutationInput, CalendarMutationResult, CreateCalendarBlockInput,
@@ -452,6 +454,72 @@ pub async fn run_ai_now(state: State<'_, AppState>) -> Result<AiEngineStatus, St
     state
         .ai
         .run_now()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn execute_ai_command(
+    state: State<'_, AppState>,
+    input: AiCommandInput,
+) -> Result<AiCommandResult, String> {
+    state
+        .ai
+        .execute_command(input)
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn list_ai_reviews(state: State<'_, AppState>) -> Result<Vec<AiReviewItem>, String> {
+    state
+        .ai
+        .reviews()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn resolve_ai_review(
+    state: State<'_, AppState>,
+    input: ResolveAiReviewInput,
+) -> Result<Vec<String>, String> {
+    state
+        .ai
+        .resolve_review(&input.review_id, &input.decision)
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn list_ai_activity(state: State<'_, AppState>) -> Result<Vec<AiActivityItem>, String> {
+    state
+        .ai
+        .activity()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn retry_ai_job(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<AiEngineStatus, String> {
+    state
+        .ai
+        .retry_job(&job_id)
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn revert_ai_action(
+    state: State<'_, AppState>,
+    action_id: String,
+) -> Result<RevertAiActionResult, String> {
+    state
+        .ai
+        .revert_action(&action_id)
         .await
         .map_err(|error| error.public_message())
 }

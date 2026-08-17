@@ -89,6 +89,12 @@ pub fn run() {
             commands::list_ollama_models,
             commands::test_ai_provider,
             commands::run_ai_now,
+            commands::execute_ai_command,
+            commands::list_ai_reviews,
+            commands::resolve_ai_review,
+            commands::list_ai_activity,
+            commands::retry_ai_job,
+            commands::revert_ai_action,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyra");
