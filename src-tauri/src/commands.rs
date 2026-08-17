@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 use crate::{
     types::{
-        CalendarBlock, CreateCalendarBlockInput, CreateTaskInput, Dashboard, Evidence, LoopRow,
+        CalendarBlock, CalendarMutationInput, CalendarMutationResult, CreateCalendarBlockInput,
+        CreateTaskInput, Dashboard, Evidence, GoogleConnectorStatus, GoogleSyncSummary, LoopRow,
         OpenLoop, SetLoopStatusInput,
     },
     AppState,
@@ -54,15 +55,23 @@ async fn find_loop(pool: &SqlitePool, id: &str) -> Result<OpenLoop, CoreError> {
     hydrate_loop(pool, row).await
 }
 
-pub async fn dashboard(pool: &SqlitePool) -> Result<Dashboard, CoreError> {
-    let rows = sqlx::query_as::<_, LoopRow>("SELECT id, title, summary, owner, status, priority, due_at, version FROM open_loops WHERE status NOT IN ('done', 'dismissed') ORDER BY priority DESC, updated_at DESC")
+pub async fn dashboard(
+    pool: &SqlitePool,
+    hide_demo: bool,
+    mut provider_calendar_blocks: Vec<CalendarBlock>,
+) -> Result<Dashboard, CoreError> {
+    let rows = sqlx::query_as::<_, LoopRow>("SELECT id, title, summary, owner, status, priority, due_at, version FROM open_loops WHERE status NOT IN ('done', 'dismissed') AND (? = 0 OR origin != 'demo') ORDER BY priority DESC, updated_at DESC")
+        .bind(hide_demo)
         .fetch_all(pool).await?;
     let mut open_loops = Vec::with_capacity(rows.len());
     for row in rows {
         open_loops.push(hydrate_loop(pool, row).await?);
     }
-    let calendar_blocks = sqlx::query_as::<_, CalendarBlock>("SELECT id, title, start_at, end_at, kind, color FROM calendar_blocks ORDER BY start_at ASC")
+    let mut calendar_blocks = sqlx::query_as::<_, CalendarBlock>("SELECT id, title, start_at, end_at, kind, color, origin, external_id, etag FROM calendar_blocks WHERE (? = 0 OR origin != 'demo') ORDER BY start_at ASC")
+        .bind(hide_demo)
         .fetch_all(pool).await?;
+    calendar_blocks.append(&mut provider_calendar_blocks);
+    calendar_blocks.sort_by(|left, right| left.start_at.cmp(&right.start_at));
     let waiting = open_loops
         .iter()
         .filter(|item| item.owner == "them")
@@ -158,15 +167,31 @@ pub async fn insert_calendar_block(
         end_at: input.end_at,
         kind: "execution".to_owned(),
         color: "#8ca481".to_owned(),
+        origin: "local".to_owned(),
+        external_id: None,
+        etag: None,
     };
-    sqlx::query("INSERT INTO calendar_blocks (id, title, start_at, end_at, kind, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO calendar_blocks (id, title, start_at, end_at, kind, color, origin, created_at) VALUES (?, ?, ?, ?, ?, ?, 'local', ?)")
         .bind(&block.id).bind(&block.title).bind(&block.start_at).bind(&block.end_at).bind(&block.kind).bind(&block.color).bind(Local::now().to_rfc3339()).execute(pool).await?;
     Ok(block)
 }
 
 #[tauri::command]
 pub async fn get_dashboard(state: State<'_, AppState>) -> Result<Dashboard, String> {
-    dashboard(&state.pool).await.map_err(public_error)
+    let connector_status = state
+        .google
+        .status()
+        .await
+        .map_err(|error| error.public_message())?;
+    let connected = connector_status.state != "disconnected";
+    let provider_blocks = if connected {
+        state.google.calendar_blocks().await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    dashboard(&state.pool, connected, provider_blocks)
+        .await
+        .map_err(public_error)
 }
 
 #[tauri::command]
@@ -205,6 +230,58 @@ pub fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|_| "Kyra could not hide its window.".to_owned())
 }
 
+#[tauri::command]
+pub async fn get_google_connector_status(
+    state: State<'_, AppState>,
+) -> Result<GoogleConnectorStatus, String> {
+    state
+        .google
+        .status()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn connect_google(state: State<'_, AppState>) -> Result<GoogleConnectorStatus, String> {
+    state
+        .google
+        .connect()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn disconnect_google(
+    state: State<'_, AppState>,
+) -> Result<GoogleConnectorStatus, String> {
+    state
+        .google
+        .disconnect()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn sync_google_now(state: State<'_, AppState>) -> Result<GoogleSyncSummary, String> {
+    state
+        .google
+        .sync_now()
+        .await
+        .map_err(|error| error.public_message())
+}
+
+#[tauri::command]
+pub async fn mutate_google_calendar(
+    state: State<'_, AppState>,
+    input: CalendarMutationInput,
+) -> Result<CalendarMutationResult, String> {
+    state
+        .google
+        .mutate_calendar(input)
+        .await
+        .map_err(|error| error.public_message())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,7 +290,7 @@ mod tests {
     #[tokio::test]
     async fn dashboard_has_seeded_evidence_backed_loops() {
         let pool = db::memory_pool().await;
-        let result = dashboard(&pool).await.unwrap();
+        let result = dashboard(&pool, false, Vec::new()).await.unwrap();
         assert_eq!(result.open_loops.len(), 5);
         assert!(result
             .open_loops
@@ -245,5 +322,34 @@ mod tests {
         )
         .await;
         assert!(matches!(conflict, Err(CoreError::Conflict)));
+    }
+
+    #[tokio::test]
+    async fn connected_dashboard_hides_demo_but_preserves_local_items() {
+        let pool = db::memory_pool().await;
+        let local = insert_task(
+            &pool,
+            CreateTaskInput {
+                title: "Keep this local task".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let google_block = CalendarBlock {
+            id: "google:event-1".into(),
+            title: "Real event".into(),
+            start_at: "2026-08-17T10:00:00Z".into(),
+            end_at: "2026-08-17T11:00:00Z".into(),
+            kind: "meeting".into(),
+            color: "#b7b9b2".into(),
+            origin: "google".into(),
+            external_id: Some("event-1".into()),
+            etag: Some("v1".into()),
+        };
+        let result = dashboard(&pool, true, vec![google_block]).await.unwrap();
+        assert_eq!(result.open_loops.len(), 1);
+        assert_eq!(result.open_loops[0].id, local.id);
+        assert_eq!(result.calendar_blocks.len(), 1);
+        assert_eq!(result.calendar_blocks[0].origin, "google");
     }
 }

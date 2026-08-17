@@ -1,13 +1,16 @@
 mod commands;
 mod db;
+mod google;
 mod types;
 
 use sqlx::SqlitePool;
+use std::sync::Arc;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 pub struct AppState {
     pool: SqlitePool,
+    google: Arc<google::GoogleConnector>,
 }
 
 pub fn run() {
@@ -34,7 +37,18 @@ pub fn run() {
         )
         .setup(move |app| {
             let pool = tauri::async_runtime::block_on(db::initialize(app.handle()))?;
-            app.manage(AppState { pool });
+            let google = google::GoogleConnector::new(pool.clone());
+            let scheduled_connector = google.clone();
+            app.manage(AppState { pool, google });
+            tauri::async_runtime::spawn(async move {
+                let _ = scheduled_connector.sync_now().await;
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+                interval.tick().await;
+                loop {
+                    interval.tick().await;
+                    scheduled_connector.sync_if_due().await;
+                }
+            });
             app.global_shortcut().register(command_k)?;
             if let Some(window) = app.get_webview_window("main") {
                 window.show()?;
@@ -48,6 +62,11 @@ pub fn run() {
             commands::set_loop_status,
             commands::create_calendar_block,
             commands::hide_overlay,
+            commands::get_google_connector_status,
+            commands::connect_google,
+            commands::disconnect_google,
+            commands::sync_google_now,
+            commands::mutate_google_calendar,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyra");

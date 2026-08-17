@@ -108,7 +108,7 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ),
     ];
     for (id, title, summary, owner, status, priority, due_at) in loops {
-        sqlx::query("INSERT INTO open_loops (id, title, summary, owner, status, priority, due_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO open_loops (id, title, summary, owner, status, priority, due_at, origin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'demo', ?, ?)")
             .bind(id).bind(title).bind(summary).bind(owner).bind(status).bind(priority).bind(due_at).bind(&created).bind(&created)
             .execute(&mut *transaction).await?;
     }
@@ -184,7 +184,7 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ),
     ];
     for (id, title, start_at, end_at, kind, color) in blocks {
-        sqlx::query("INSERT INTO calendar_blocks (id, title, start_at, end_at, kind, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO calendar_blocks (id, title, start_at, end_at, kind, color, origin, created_at) VALUES (?, ?, ?, ?, ?, ?, 'demo', ?)")
             .bind(id).bind(title).bind(start_at).bind(end_at).bind(kind).bind(color).bind(&created)
             .execute(&mut *transaction).await?;
     }

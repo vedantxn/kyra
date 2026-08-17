@@ -6,5 +6,10 @@ commands.allow = [
   "create_task",
   "set_loop_status",
   "create_calendar_block",
-  "hide_overlay"
+  "hide_overlay",
+  "get_google_connector_status",
+  "connect_google",
+  "disconnect_google",
+  "sync_google_now",
+  "mutate_google_calendar"
 ]
