@@ -2535,6 +2535,7 @@ name = "kyra"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "dotenvy",
@@ -2543,6 +2544,7 @@ dependencies = [
  "hmac 0.12.1",
  "html2text",
  "keyring",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
