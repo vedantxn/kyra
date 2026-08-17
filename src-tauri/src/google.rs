@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc, time::Duration as StdDuration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration as StdDuration,
+};
 
 use aes_gcm::{
     aead::{Aead, Generate, Key, KeyInit},
@@ -138,6 +142,7 @@ struct AccountRow {
     last_sync_at: Option<String>,
     next_sync_at: Option<String>,
     last_error_code: Option<String>,
+    generation: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -368,7 +373,7 @@ impl GoogleConnector {
 
     async fn account(&self) -> Result<AccountRow, GoogleError> {
         sqlx::query_as::<_, AccountRow>(
-            "SELECT id, state, email_nonce, email_ciphertext, gmail_history_id, calendar_sync_token, calendar_window_anchor, last_sync_at, next_sync_at, last_error_code FROM connector_accounts WHERE provider = 'google' ORDER BY created_at DESC LIMIT 1",
+            "SELECT id, state, email_nonce, email_ciphertext, gmail_history_id, calendar_sync_token, calendar_window_anchor, last_sync_at, next_sync_at, last_error_code, generation FROM connector_accounts WHERE provider = 'google' ORDER BY created_at DESC LIMIT 1",
         )
         .fetch_optional(&self.pool)
         .await?
@@ -518,6 +523,7 @@ impl GoogleConnector {
     }
 
     pub async fn disconnect(&self) -> Result<GoogleConnectorStatus, GoogleError> {
+        let _guard = self.sync_lock.lock().await;
         if let Ok(account) = self.account().await {
             self.remove_account(&account.id).await?;
         }
@@ -525,14 +531,50 @@ impl GoogleConnector {
     }
 
     async fn remove_account(&self, account_id: &str) -> Result<(), GoogleError> {
-        delete_secret(account_id, "refresh_token")?;
-        delete_secret(account_id, "data_key")?;
+        let cleanup_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
         let mut transaction = self.pool.begin().await?;
+        sqlx::query("UPDATE connector_accounts SET generation = generation + 1, updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(account_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("UPDATE ai_jobs SET status = 'cancelled', lease_owner = NULL, lease_token = NULL, leased_until = NULL, updated_at = ? WHERE account_id = ? AND status IN ('queued', 'leased', 'failed')")
+            .bind(&now)
+            .bind(account_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM open_loops WHERE origin = 'google' AND NOT EXISTS (SELECT 1 FROM loop_derivations d WHERE d.loop_id = open_loops.id AND d.source_type IN ('user', 'command') AND d.active = 1)")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM calendar_blocks WHERE origin = 'google'")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("INSERT INTO ai_secret_cleanup (id, service, account, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)")
+            .bind(&cleanup_id)
+            .bind(GOOGLE_KEYCHAIN_SERVICE)
+            .bind(account_id)
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query("DELETE FROM connector_accounts WHERE id = ?")
             .bind(account_id)
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
+
+        let secrets_removed = delete_secret(account_id, "refresh_token").is_ok()
+            && delete_secret(account_id, "data_key").is_ok();
+        if secrets_removed {
+            sqlx::query(
+                "UPDATE ai_secret_cleanup SET status = 'complete', updated_at = ? WHERE id = ?",
+            )
+            .bind(Utc::now().to_rfc3339())
+            .bind(cleanup_id)
+            .execute(&self.pool)
+            .await?;
+        }
         self.tokens.lock().await.remove(account_id);
         Ok(())
     }
@@ -677,13 +719,17 @@ impl GoogleConnector {
             Ok(()) => {
                 let completed = Utc::now();
                 let next = completed + Duration::minutes(FIVE_MINUTES);
-                sqlx::query("UPDATE connector_accounts SET state = 'connected', last_sync_at = ?, next_sync_at = ?, retry_count = 0, last_error_code = NULL, updated_at = ? WHERE id = ?")
+                let updated = sqlx::query("UPDATE connector_accounts SET state = 'connected', last_sync_at = ?, next_sync_at = ?, retry_count = 0, last_error_code = NULL, updated_at = ? WHERE id = ? AND generation = ?")
                     .bind(completed.to_rfc3339())
                     .bind(next.to_rfc3339())
                     .bind(completed.to_rfc3339())
                     .bind(&account.id)
+                    .bind(account.generation)
                     .execute(&self.pool)
                     .await?;
+                if updated.rows_affected() == 0 {
+                    return Err(GoogleError::NotConnected);
+                }
                 let (gmail_message_count, calendar_event_count) =
                     self.item_counts(&account.id).await?;
                 Ok(GoogleSyncSummary {
@@ -768,13 +814,62 @@ impl GoogleConnector {
             .json()
             .await
             .map_err(|_| GoogleError::Provider)?;
-        let mut transaction = self.pool.begin().await?;
-        sqlx::query("DELETE FROM provider_items WHERE account_id = ? AND kind = 'gmail_message'")
+        let generation_id = Uuid::new_v4().to_string();
+        let account_generation: i64 =
+            sqlx::query_scalar("SELECT generation FROM connector_accounts WHERE id = ?")
+                .bind(account_id)
+                .fetch_one(&self.pool)
+                .await?;
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("INSERT INTO ingest_generations (id, account_id, account_generation, source_kind, status, expected_items, created_at) VALUES (?, ?, ?, 'gmail_message', 'pending', ?, ?)")
+            .bind(&generation_id)
             .bind(account_id)
-            .execute(&mut *transaction)
+            .bind(account_generation)
+            .bind(messages.len() as i64)
+            .bind(&now)
+            .execute(&self.pool)
             .await?;
-        for message in messages {
-            persist_gmail_message(&mut transaction, account_id, data_key, &message).await?;
+        let present: HashSet<String> = messages.iter().map(|message| message.id.clone()).collect();
+        for batch in messages.chunks(50) {
+            let mut transaction = self.pool.begin().await?;
+            for message in batch {
+                persist_gmail_message(
+                    &mut transaction,
+                    account_id,
+                    data_key,
+                    message,
+                    Some(&generation_id),
+                )
+                .await?;
+            }
+            sqlx::query("UPDATE ingest_generations SET committed_items = committed_items + ? WHERE id = ? AND status = 'pending'")
+                .bind(batch.len() as i64)
+                .bind(&generation_id)
+                .execute(&mut *transaction)
+                .await?;
+            transaction.commit().await?;
+        }
+        let existing: Vec<String> = sqlx::query_scalar("SELECT external_id FROM provider_items WHERE account_id = ? AND kind = 'gmail_message'")
+            .bind(account_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut transaction = self.pool.begin().await?;
+        for external_id in existing.into_iter().filter(|id| !present.contains(id)) {
+            persist_tombstone_revision(
+                &mut transaction,
+                account_id,
+                data_key,
+                account_generation,
+                &generation_id,
+                "gmail_message",
+                &external_id,
+            )
+            .await?;
+            sqlx::query("DELETE FROM provider_items WHERE account_id = ? AND kind = 'gmail_message' AND external_id = ?")
+                .bind(account_id)
+                .bind(external_id)
+                .execute(&mut *transaction)
+                .await?;
         }
         sqlx::query(
             "UPDATE connector_accounts SET gmail_history_id = ?, updated_at = ? WHERE id = ?",
@@ -784,6 +879,12 @@ impl GoogleConnector {
         .bind(account_id)
         .execute(&mut *transaction)
         .await?;
+        sqlx::query("UPDATE ingest_generations SET status = 'complete', completed_at = ? WHERE id = ? AND account_generation = (SELECT generation FROM connector_accounts WHERE id = ?)")
+            .bind(Utc::now().to_rfc3339())
+            .bind(&generation_id)
+            .bind(account_id)
+            .execute(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -844,8 +945,40 @@ impl GoogleConnector {
         deleted.dedup();
         let messages = self.fetch_gmail_messages(access_token, added).await?;
         let cutoff = (Utc::now() - Duration::days(30)).to_rfc3339();
+        let aged_out: Vec<String> = sqlx::query_scalar("SELECT external_id FROM provider_items WHERE account_id = ? AND kind = 'gmail_message' AND occurred_at < ?")
+            .bind(account_id)
+            .bind(&cutoff)
+            .fetch_all(&self.pool)
+            .await?;
+        deleted.extend(aged_out);
+        deleted.sort();
+        deleted.dedup();
+        let generation_id = Uuid::new_v4().to_string();
+        let account_generation: i64 =
+            sqlx::query_scalar("SELECT generation FROM connector_accounts WHERE id = ?")
+                .bind(account_id)
+                .fetch_one(&self.pool)
+                .await?;
         let mut transaction = self.pool.begin().await?;
+        sqlx::query("INSERT INTO ingest_generations (id, account_id, account_generation, source_kind, status, expected_items, created_at) VALUES (?, ?, ?, 'gmail_message', 'pending', ?, ?)")
+            .bind(&generation_id)
+            .bind(account_id)
+            .bind(account_generation)
+            .bind((messages.len() + deleted.len()) as i64)
+            .bind(Utc::now().to_rfc3339())
+            .execute(&mut *transaction)
+            .await?;
         for external_id in deleted {
+            persist_tombstone_revision(
+                &mut transaction,
+                account_id,
+                data_key,
+                account_generation,
+                &generation_id,
+                "gmail_message",
+                &external_id,
+            )
+            .await?;
             sqlx::query("DELETE FROM provider_items WHERE account_id = ? AND kind = 'gmail_message' AND external_id = ?")
                 .bind(account_id)
                 .bind(external_id)
@@ -853,13 +986,15 @@ impl GoogleConnector {
                 .await?;
         }
         for message in messages {
-            persist_gmail_message(&mut transaction, account_id, data_key, &message).await?;
-        }
-        sqlx::query("DELETE FROM provider_items WHERE account_id = ? AND kind = 'gmail_message' AND occurred_at < ?")
-            .bind(account_id)
-            .bind(cutoff)
-            .execute(&mut *transaction)
+            persist_gmail_message(
+                &mut transaction,
+                account_id,
+                data_key,
+                &message,
+                Some(&generation_id),
+            )
             .await?;
+        }
         sqlx::query(
             "UPDATE connector_accounts SET gmail_history_id = ?, updated_at = ? WHERE id = ?",
         )
@@ -868,6 +1003,12 @@ impl GoogleConnector {
         .bind(account_id)
         .execute(&mut *transaction)
         .await?;
+        sqlx::query("UPDATE ingest_generations SET status = 'complete', committed_items = expected_items, completed_at = ? WHERE id = ? AND account_generation = (SELECT generation FROM connector_accounts WHERE id = ?)")
+            .bind(Utc::now().to_rfc3339())
+            .bind(&generation_id)
+            .bind(account_id)
+            .execute(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         Ok(true)
     }
@@ -941,18 +1082,78 @@ impl GoogleConnector {
             .fetch_calendar_pages(access_token, None, Some((&time_min, &time_max)))
             .await?
             .ok_or(GoogleError::Provider)?;
-        let mut transaction = self.pool.begin().await?;
-        sqlx::query("DELETE FROM provider_items WHERE account_id = ? AND kind = 'calendar_event'")
+        let generation_id = Uuid::new_v4().to_string();
+        let account_generation: i64 =
+            sqlx::query_scalar("SELECT generation FROM connector_accounts WHERE id = ?")
+                .bind(account_id)
+                .fetch_one(&self.pool)
+                .await?;
+        let present: HashSet<String> = events.iter().map(|event| event.id.clone()).collect();
+        let existing: Vec<String> = sqlx::query_scalar("SELECT external_id FROM provider_items WHERE account_id = ? AND kind = 'calendar_event'")
             .bind(account_id)
-            .execute(&mut *transaction)
+            .fetch_all(&self.pool)
             .await?;
-        for event in events {
-            persist_calendar_event(&mut transaction, account_id, data_key, &event).await?;
+        let removed: Vec<String> = existing
+            .into_iter()
+            .filter(|external_id| !present.contains(external_id))
+            .collect();
+        let expected_items = events.len() + removed.len();
+        sqlx::query("INSERT INTO ingest_generations (id, account_id, account_generation, source_kind, status, expected_items, created_at) VALUES (?, ?, ?, 'calendar_event', 'pending', ?, ?)")
+            .bind(&generation_id)
+            .bind(account_id)
+            .bind(account_generation)
+            .bind(expected_items as i64)
+            .bind(anchor.to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+
+        for batch in events.chunks(100) {
+            let mut transaction = self.pool.begin().await?;
+            for event in batch {
+                persist_calendar_event(
+                    &mut transaction,
+                    account_id,
+                    data_key,
+                    event,
+                    Some(&generation_id),
+                )
+                .await?;
+            }
+            sqlx::query("UPDATE ingest_generations SET committed_items = committed_items + ? WHERE id = ? AND status = 'pending'")
+                .bind(batch.len() as i64)
+                .bind(&generation_id)
+                .execute(&mut *transaction)
+                .await?;
+            transaction.commit().await?;
+        }
+        let mut transaction = self.pool.begin().await?;
+        for external_id in removed {
+            persist_tombstone_revision(
+                &mut transaction,
+                account_id,
+                data_key,
+                account_generation,
+                &generation_id,
+                "calendar_event",
+                &external_id,
+            )
+            .await?;
+            sqlx::query("DELETE FROM provider_items WHERE account_id = ? AND kind = 'calendar_event' AND external_id = ?")
+                .bind(account_id)
+                .bind(external_id)
+                .execute(&mut *transaction)
+                .await?;
         }
         sqlx::query("UPDATE connector_accounts SET calendar_sync_token = ?, calendar_window_anchor = ?, updated_at = ? WHERE id = ?")
             .bind(sync_token)
             .bind(anchor.to_rfc3339())
             .bind(anchor.to_rfc3339())
+            .bind(account_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("UPDATE ingest_generations SET status = 'complete', committed_items = expected_items, completed_at = ? WHERE id = ? AND account_generation = (SELECT generation FROM connector_accounts WHERE id = ?)")
+            .bind(Utc::now().to_rfc3339())
+            .bind(&generation_id)
             .bind(account_id)
             .execute(&mut *transaction)
             .await?;
@@ -973,9 +1174,30 @@ impl GoogleConnector {
         else {
             return Ok(false);
         };
+        let generation_id = Uuid::new_v4().to_string();
+        let account_generation: i64 =
+            sqlx::query_scalar("SELECT generation FROM connector_accounts WHERE id = ?")
+                .bind(account_id)
+                .fetch_one(&self.pool)
+                .await?;
         let mut transaction = self.pool.begin().await?;
+        sqlx::query("INSERT INTO ingest_generations (id, account_id, account_generation, source_kind, status, expected_items, created_at) VALUES (?, ?, ?, 'calendar_event', 'pending', ?, ?)")
+            .bind(&generation_id)
+            .bind(account_id)
+            .bind(account_generation)
+            .bind(events.len() as i64)
+            .bind(Utc::now().to_rfc3339())
+            .execute(&mut *transaction)
+            .await?;
         for event in events {
-            persist_calendar_event(&mut transaction, account_id, data_key, &event).await?;
+            persist_calendar_event(
+                &mut transaction,
+                account_id,
+                data_key,
+                &event,
+                Some(&generation_id),
+            )
+            .await?;
         }
         sqlx::query(
             "UPDATE connector_accounts SET calendar_sync_token = ?, updated_at = ? WHERE id = ?",
@@ -985,6 +1207,12 @@ impl GoogleConnector {
         .bind(account_id)
         .execute(&mut *transaction)
         .await?;
+        sqlx::query("UPDATE ingest_generations SET status = 'complete', committed_items = expected_items, completed_at = ? WHERE id = ? AND account_generation = (SELECT generation FROM connector_accounts WHERE id = ?)")
+            .bind(Utc::now().to_rfc3339())
+            .bind(&generation_id)
+            .bind(account_id)
+            .execute(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         Ok(true)
     }
@@ -1162,6 +1390,7 @@ impl GoogleConnector {
                 self.delete_google_event(
                     &account.id,
                     &access_token,
+                    &data_key,
                     &operation_id,
                     &event_id,
                     &expected_etag,
@@ -1296,10 +1525,12 @@ impl GoogleConnector {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn delete_google_event(
         &self,
         account_id: &str,
         access_token: &str,
+        data_key: &[u8; 32],
         operation_id: &str,
         event_id: &str,
         expected_etag: &str,
@@ -1331,6 +1562,27 @@ impl GoogleConnector {
             checked_response(response)?;
         }
         let mut transaction = self.pool.begin().await?;
+        let tombstone = serde_json::to_vec(&json!({
+            "deleted": true,
+            "externalId": event_id,
+            "providerVersion": expected_etag,
+            "reason": "explicit_calendar_delete"
+        }))
+        .map_err(|_| GoogleError::Crypto)?;
+        persist_source_revision(
+            &mut transaction,
+            account_id,
+            data_key,
+            None,
+            "calendar_event",
+            event_id,
+            None,
+            Some(expected_etag),
+            None,
+            true,
+            &tombstone,
+        )
+        .await?;
         sqlx::query("DELETE FROM provider_items WHERE account_id = ? AND kind = 'calendar_event' AND external_id = ?")
             .bind(account_id)
             .bind(event_id)
@@ -1357,7 +1609,7 @@ impl GoogleConnector {
         event: &StoredCalendarEvent,
     ) -> Result<(), GoogleError> {
         let mut transaction = self.pool.begin().await?;
-        persist_calendar_event(&mut transaction, account_id, data_key, event).await?;
+        persist_calendar_event(&mut transaction, account_id, data_key, event, None).await?;
         sqlx::query("UPDATE connector_mutations SET status = 'succeeded', result_external_id = ?, last_error_code = NULL, updated_at = ? WHERE operation_id = ?")
             .bind(&event.id)
             .bind(Utc::now().to_rfc3339())
@@ -1417,10 +1669,26 @@ async fn persist_gmail_message(
     account_id: &str,
     data_key: &[u8; 32],
     message: &StoredGmailMessage,
+    ingest_generation_id: Option<&str>,
 ) -> Result<(), GoogleError> {
     let (nonce, ciphertext) = encrypt_value(data_key, message)?;
+    let revision_payload = serde_json::to_vec(message).map_err(|_| GoogleError::Crypto)?;
+    let revision_id = persist_source_revision(
+        transaction,
+        account_id,
+        data_key,
+        ingest_generation_id,
+        "gmail_message",
+        &message.id,
+        Some(&message.thread_id),
+        None,
+        Some(&message.occurred_at),
+        false,
+        &revision_payload,
+    )
+    .await?;
     let now = Utc::now().to_rfc3339();
-    sqlx::query("INSERT INTO provider_items (id, account_id, kind, external_id, thread_id, occurred_at, status, nonce, ciphertext, created_at, updated_at) VALUES (?, ?, 'gmail_message', ?, ?, ?, 'active', ?, ?, ?, ?) ON CONFLICT(account_id, kind, external_id) DO UPDATE SET thread_id = excluded.thread_id, occurred_at = excluded.occurred_at, nonce = excluded.nonce, ciphertext = excluded.ciphertext, updated_at = excluded.updated_at")
+    sqlx::query("INSERT INTO provider_items (id, account_id, kind, external_id, thread_id, occurred_at, status, nonce, ciphertext, latest_revision_id, ingest_generation_id, created_at, updated_at) VALUES (?, ?, 'gmail_message', ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?) ON CONFLICT(account_id, kind, external_id) DO UPDATE SET thread_id = excluded.thread_id, occurred_at = excluded.occurred_at, nonce = excluded.nonce, ciphertext = excluded.ciphertext, latest_revision_id = excluded.latest_revision_id, ingest_generation_id = excluded.ingest_generation_id, updated_at = excluded.updated_at")
         .bind(format!("{account_id}:gmail:{}", message.id))
         .bind(account_id)
         .bind(&message.id)
@@ -1428,6 +1696,8 @@ async fn persist_gmail_message(
         .bind(&message.occurred_at)
         .bind(nonce)
         .bind(ciphertext)
+        .bind(revision_id)
+        .bind(ingest_generation_id)
         .bind(&now)
         .bind(&now)
         .execute(&mut **transaction)
@@ -1440,10 +1710,26 @@ async fn persist_calendar_event(
     account_id: &str,
     data_key: &[u8; 32],
     event: &StoredCalendarEvent,
+    ingest_generation_id: Option<&str>,
 ) -> Result<(), GoogleError> {
     let (nonce, ciphertext) = encrypt_value(data_key, event)?;
+    let revision_payload = serde_json::to_vec(event).map_err(|_| GoogleError::Crypto)?;
+    let revision_id = persist_source_revision(
+        transaction,
+        account_id,
+        data_key,
+        ingest_generation_id,
+        "calendar_event",
+        &event.id,
+        None,
+        Some(&event.etag),
+        Some(&event.start_at),
+        event.status == "cancelled",
+        &revision_payload,
+    )
+    .await?;
     let now = Utc::now().to_rfc3339();
-    sqlx::query("INSERT INTO provider_items (id, account_id, kind, external_id, etag, occurred_at, starts_at, ends_at, status, nonce, ciphertext, created_at, updated_at) VALUES (?, ?, 'calendar_event', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(account_id, kind, external_id) DO UPDATE SET etag = excluded.etag, occurred_at = excluded.occurred_at, starts_at = excluded.starts_at, ends_at = excluded.ends_at, status = excluded.status, nonce = excluded.nonce, ciphertext = excluded.ciphertext, updated_at = excluded.updated_at")
+    sqlx::query("INSERT INTO provider_items (id, account_id, kind, external_id, etag, occurred_at, starts_at, ends_at, status, nonce, ciphertext, latest_revision_id, ingest_generation_id, created_at, updated_at) VALUES (?, ?, 'calendar_event', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(account_id, kind, external_id) DO UPDATE SET etag = excluded.etag, occurred_at = excluded.occurred_at, starts_at = excluded.starts_at, ends_at = excluded.ends_at, status = excluded.status, nonce = excluded.nonce, ciphertext = excluded.ciphertext, latest_revision_id = excluded.latest_revision_id, ingest_generation_id = excluded.ingest_generation_id, updated_at = excluded.updated_at")
         .bind(format!("{account_id}:calendar:{}", event.id))
         .bind(account_id)
         .bind(&event.id)
@@ -1454,10 +1740,119 @@ async fn persist_calendar_event(
         .bind(&event.status)
         .bind(nonce)
         .bind(ciphertext)
+        .bind(revision_id)
+        .bind(ingest_generation_id)
         .bind(&now)
         .bind(&now)
         .execute(&mut **transaction)
         .await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn persist_source_revision(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    account_id: &str,
+    data_key: &[u8; 32],
+    ingest_generation_id: Option<&str>,
+    kind: &str,
+    external_id: &str,
+    thread_id: Option<&str>,
+    provider_version: Option<&str>,
+    occurred_at: Option<&str>,
+    tombstone: bool,
+    plaintext: &[u8],
+) -> Result<String, GoogleError> {
+    let account_generation: i64 =
+        sqlx::query_scalar("SELECT generation FROM connector_accounts WHERE id = ?")
+            .bind(account_id)
+            .fetch_one(&mut **transaction)
+            .await?;
+    let mut hash_input = plaintext.to_vec();
+    if tombstone {
+        hash_input.extend_from_slice(ingest_generation_id.unwrap_or_default().as_bytes());
+    }
+    let content_hash = format!("{:x}", Sha256::digest(&hash_input));
+    let revision_id = format!("{account_id}:{kind}:{external_id}:{content_hash}");
+    let (nonce, ciphertext) = encrypt_value(
+        data_key,
+        &serde_json::from_slice::<Value>(plaintext)
+            .unwrap_or_else(|_| json!({"deleted": tombstone, "externalId": external_id})),
+    )?;
+    sqlx::query("INSERT OR IGNORE INTO provider_item_revisions (id, account_id, account_generation, ingest_generation_id, kind, external_id, thread_id, provider_version, content_hash, tombstone, occurred_at, nonce, ciphertext, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&revision_id)
+        .bind(account_id)
+        .bind(account_generation)
+        .bind(ingest_generation_id)
+        .bind(kind)
+        .bind(external_id)
+        .bind(thread_id)
+        .bind(provider_version)
+        .bind(&content_hash)
+        .bind(tombstone)
+        .bind(occurred_at)
+        .bind(nonce)
+        .bind(ciphertext)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&mut **transaction)
+        .await?;
+
+    if kind == "gmail_message" {
+        if let Some(fingerprint) = sqlx::query_scalar::<_, String>("SELECT activation_fingerprint FROM ai_provider_configs WHERE selected = 1 AND state = 'ready' AND activation_fingerprint IS NOT NULL")
+            .fetch_optional(&mut **transaction)
+            .await?
+        {
+            let job_id = Uuid::new_v4().to_string();
+            let idempotency_key = format!("extract:{revision_id}:{fingerprint}");
+            let now = Utc::now().to_rfc3339();
+            sqlx::query("INSERT OR IGNORE INTO ai_jobs (id, kind, account_id, account_generation, ingest_generation_id, source_revision_id, activation_fingerprint, idempotency_key, status, priority, not_before, created_at, updated_at) VALUES (?, 'extract_thread', ?, ?, ?, ?, ?, ?, 'queued', 70, ?, ?, ?)")
+                .bind(job_id)
+                .bind(account_id)
+                .bind(account_generation)
+                .bind(ingest_generation_id)
+                .bind(&revision_id)
+                .bind(&fingerprint)
+                .bind(idempotency_key)
+                .bind(&now)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut **transaction)
+                .await?;
+        }
+    }
+    Ok(revision_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn persist_tombstone_revision(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    account_id: &str,
+    data_key: &[u8; 32],
+    account_generation: i64,
+    ingest_generation_id: &str,
+    kind: &str,
+    external_id: &str,
+) -> Result<(), GoogleError> {
+    let payload = serde_json::to_vec(&json!({
+        "deleted": true,
+        "externalId": external_id,
+        "accountGeneration": account_generation,
+    }))
+    .map_err(|_| GoogleError::Crypto)?;
+    persist_source_revision(
+        transaction,
+        account_id,
+        data_key,
+        Some(ingest_generation_id),
+        kind,
+        external_id,
+        None,
+        None,
+        None,
+        true,
+        &payload,
+    )
+    .await?;
     Ok(())
 }
 
@@ -2202,7 +2597,7 @@ mod tests {
             labels: vec!["INBOX".to_owned()],
         };
         let mut transaction = pool.begin().await.unwrap();
-        persist_gmail_message(&mut transaction, &account_id, &key, &message)
+        persist_gmail_message(&mut transaction, &account_id, &key, &message, None)
             .await
             .unwrap();
         transaction.commit().await.unwrap();
@@ -2346,7 +2741,7 @@ mod tests {
             recurring_event_id: None,
         };
         let mut transaction = pool.begin().await.unwrap();
-        persist_calendar_event(&mut transaction, &account_id, &key, &stored)
+        persist_calendar_event(&mut transaction, &account_id, &key, &stored, None)
             .await
             .unwrap();
         transaction.commit().await.unwrap();

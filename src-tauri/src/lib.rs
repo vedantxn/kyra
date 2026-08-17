@@ -1,4 +1,5 @@
 mod commands;
+mod crypto;
 mod db;
 mod google;
 mod types;
@@ -10,6 +11,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 pub struct AppState {
     pool: SqlitePool,
+    cipher: crypto::LocalCipher,
     google: Arc<google::GoogleConnector>,
 }
 
@@ -36,10 +38,14 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
-            let pool = tauri::async_runtime::block_on(db::initialize(app.handle()))?;
+            let (pool, cipher) = tauri::async_runtime::block_on(db::initialize(app.handle()))?;
             let google = google::GoogleConnector::new(pool.clone());
             let scheduled_connector = google.clone();
-            app.manage(AppState { pool, google });
+            app.manage(AppState {
+                pool,
+                cipher,
+                google,
+            });
             tauri::async_runtime::spawn(async move {
                 let _ = scheduled_connector.sync_now().await;
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));

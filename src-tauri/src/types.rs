@@ -11,16 +11,37 @@ pub struct Evidence {
     pub occurred_at: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoopPayload {
+    pub title: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidencePayload {
+    pub source_label: String,
+    pub excerpt: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TransitionPayload {
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct LoopRow {
     pub id: String,
-    pub title: String,
-    pub summary: String,
-    pub owner: String,
-    pub status: String,
+    pub lifecycle: String,
+    pub ownership: String,
     pub priority: i64,
     pub due_at: Option<String>,
     pub version: i64,
+    pub payload_nonce: Vec<u8>,
+    pub payload_ciphertext: Vec<u8>,
+    pub review_state: String,
+    pub scheduled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -31,6 +52,10 @@ pub struct OpenLoop {
     pub summary: String,
     pub owner: String,
     pub status: String,
+    pub lifecycle: String,
+    pub ownership: String,
+    pub review_state: String,
+    pub scheduled: bool,
     pub priority: i64,
     pub due_at: Option<String>,
     pub version: i64,

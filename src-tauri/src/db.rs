@@ -7,7 +7,14 @@ use sqlx::{
 };
 use tauri::{AppHandle, Manager};
 
-pub async fn initialize(app: &AppHandle) -> Result<SqlitePool, Box<dyn std::error::Error>> {
+use crate::{
+    crypto::LocalCipher,
+    types::{EvidencePayload, LoopPayload, TransitionPayload},
+};
+
+pub async fn initialize(
+    app: &AppHandle,
+) -> Result<(SqlitePool, LocalCipher), Box<dyn std::error::Error>> {
     let app_data = app.path().app_data_dir()?;
     fs::create_dir_all(&app_data)?;
     let options = SqliteConnectOptions::new()
@@ -21,7 +28,14 @@ pub async fn initialize(app: &AppHandle) -> Result<SqlitePool, Box<dyn std::erro
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     seed_if_empty(&pool).await?;
-    Ok(pool)
+    let encrypted_rows: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM open_loops WHERE payload_migrated = 1) + (SELECT COUNT(*) FROM app_meta WHERE key = 'app_key_initialized')",
+    )
+    .fetch_one(&pool)
+    .await?;
+    let cipher = LocalCipher::load_or_create(encrypted_rows > 0)?;
+    migrate_sensitive_rows(&pool, &cipher).await?;
+    Ok((pool, cipher))
 }
 
 #[cfg(test)]
@@ -37,6 +51,96 @@ pub async fn memory_pool() -> SqlitePool {
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     seed_if_empty(&pool).await.unwrap();
     pool
+}
+
+#[cfg(test)]
+pub async fn memory_secure() -> (SqlitePool, LocalCipher) {
+    let pool = memory_pool().await;
+    let cipher = LocalCipher::random();
+    migrate_sensitive_rows(&pool, &cipher).await.unwrap();
+    (pool, cipher)
+}
+
+async fn migrate_sensitive_rows(
+    pool: &SqlitePool,
+    cipher: &LocalCipher,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let loops = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT id, title, summary FROM open_loops WHERE payload_migrated = 0",
+    )
+    .fetch_all(pool)
+    .await?;
+    for (id, title, summary) in loops {
+        let payload = LoopPayload { title, summary };
+        let (nonce, ciphertext) = cipher.encrypt(&payload)?;
+        let title_hash = cipher.pseudonymous_id("loop:title", &payload.title);
+        let summary_hash = cipher.pseudonymous_id("loop:summary", &payload.summary);
+        let (title_nonce, title_ciphertext) = cipher.encrypt(&payload.title)?;
+        let (summary_nonce, summary_ciphertext) = cipher.encrypt(&payload.summary)?;
+        let now = Local::now().to_rfc3339();
+        let mut transaction = pool.begin().await?;
+        sqlx::query("UPDATE open_loops SET title = 'Encrypted', summary = '', payload_nonce = ?, payload_ciphertext = ?, payload_migrated = 1 WHERE id = ? AND payload_migrated = 0")
+            .bind(nonce)
+            .bind(ciphertext)
+            .bind(&id)
+            .execute(&mut *transaction)
+            .await?;
+        for (field, value_hash, value_nonce, value_ciphertext) in [
+            ("title", title_hash, title_nonce, title_ciphertext),
+            ("summary", summary_hash, summary_nonce, summary_ciphertext),
+        ] {
+            sqlx::query("INSERT OR IGNORE INTO loop_derivations (id, loop_id, field_name, source_type, active, value_hash, payload_nonce, payload_ciphertext, created_at) VALUES (?, ?, ?, 'user', 1, ?, ?, ?, ?)")
+                .bind(format!("migration:{id}:{field}"))
+                .bind(&id)
+                .bind(field)
+                .bind(value_hash)
+                .bind(value_nonce)
+                .bind(value_ciphertext)
+                .bind(&now)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+    }
+
+    let evidence = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT id, source_label, excerpt FROM evidence WHERE payload_migrated = 0",
+    )
+    .fetch_all(pool)
+    .await?;
+    for (id, source_label, excerpt) in evidence {
+        let (nonce, ciphertext) = cipher.encrypt(&EvidencePayload {
+            source_label,
+            excerpt,
+        })?;
+        sqlx::query("UPDATE evidence SET source_label = '', excerpt = '', payload_nonce = ?, payload_ciphertext = ?, payload_migrated = 1 WHERE id = ? AND payload_migrated = 0")
+            .bind(nonce)
+            .bind(ciphertext)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+
+    let transitions = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, reason FROM loop_transitions WHERE payload_migrated = 0",
+    )
+    .fetch_all(pool)
+    .await?;
+    for (id, reason) in transitions {
+        let (nonce, ciphertext) = cipher.encrypt(&TransitionPayload { reason })?;
+        sqlx::query("UPDATE loop_transitions SET reason = 'encrypted', payload_nonce = ?, payload_ciphertext = ?, payload_migrated = 1 WHERE id = ? AND payload_migrated = 0")
+            .bind(nonce)
+            .bind(ciphertext)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+
+    sqlx::query("INSERT INTO app_meta (key, value, updated_at) VALUES ('app_key_initialized', '1', ?) ON CONFLICT(key) DO UPDATE SET value = '1', updated_at = excluded.updated_at")
+        .bind(Local::now().to_rfc3339())
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 async fn seed_if_empty(pool: &SqlitePool) -> Result<(), sqlx::Error> {

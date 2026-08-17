@@ -1,13 +1,14 @@
 use chrono::{DateTime, Local};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use tauri::{Manager, State};
 use uuid::Uuid;
 
 use crate::{
     types::{
         CalendarBlock, CalendarMutationInput, CalendarMutationResult, CreateCalendarBlockInput,
-        CreateTaskInput, Dashboard, Evidence, GoogleConnectorStatus, GoogleSyncSummary, LoopRow,
-        OpenLoop, SetLoopStatusInput,
+        CreateTaskInput, Dashboard, Evidence, GoogleConnectorStatus, GoogleSyncSummary,
+        LoopPayload, LoopRow, OpenLoop, SetLoopStatusInput, TransitionPayload,
     },
     AppState,
 };
@@ -31,17 +32,41 @@ fn public_error(error: CoreError) -> String {
     }
 }
 
-async fn hydrate_loop(pool: &SqlitePool, row: LoopRow) -> Result<OpenLoop, CoreError> {
-    let evidence = sqlx::query_as::<_, (String, String, String, String, String)>(
-        "SELECT id, source_kind, source_label, excerpt, occurred_at FROM evidence WHERE loop_id = ? ORDER BY occurred_at DESC",
-    ).bind(&row.id).fetch_all(pool).await?
-        .into_iter().map(|item| Evidence { id: item.0, source_kind: item.1, source_label: item.2, excerpt: item.3, occurred_at: item.4 }).collect();
+impl From<crate::crypto::CryptoError> for CoreError {
+    fn from(_: crate::crypto::CryptoError) -> Self {
+        Self::Validation("Kyra could not decrypt its local data.".to_owned())
+    }
+}
+
+fn hydrate_loop(
+    cipher: &crate::crypto::LocalCipher,
+    row: LoopRow,
+    evidence: Vec<Evidence>,
+) -> Result<OpenLoop, CoreError> {
+    let payload: LoopPayload = cipher.decrypt(&row.payload_nonce, &row.payload_ciphertext)?;
+    let status = match row.lifecycle.as_str() {
+        "resolved" => "done",
+        "dismissed" => "dismissed",
+        _ if row.ownership == "other" => "waiting",
+        _ => "open",
+    }
+    .to_owned();
+    let owner = if row.ownership == "other" {
+        "them"
+    } else {
+        "me"
+    }
+    .to_owned();
     Ok(OpenLoop {
         id: row.id,
-        title: row.title,
-        summary: row.summary,
-        owner: row.owner,
-        status: row.status,
+        title: payload.title,
+        summary: payload.summary,
+        owner,
+        status,
+        lifecycle: row.lifecycle,
+        ownership: row.ownership,
+        review_state: row.review_state,
+        scheduled: row.scheduled,
         priority: row.priority,
         due_at: row.due_at,
         version: row.version,
@@ -49,23 +74,71 @@ async fn hydrate_loop(pool: &SqlitePool, row: LoopRow) -> Result<OpenLoop, CoreE
     })
 }
 
-async fn find_loop(pool: &SqlitePool, id: &str) -> Result<OpenLoop, CoreError> {
-    let row = sqlx::query_as::<_, LoopRow>("SELECT id, title, summary, owner, status, priority, due_at, version FROM open_loops WHERE id = ?")
+async fn find_loop(
+    pool: &SqlitePool,
+    cipher: &crate::crypto::LocalCipher,
+    id: &str,
+) -> Result<OpenLoop, CoreError> {
+    let row = sqlx::query_as::<_, LoopRow>("SELECT id, lifecycle, ownership, priority, due_at, version, payload_nonce, payload_ciphertext, CASE WHEN EXISTS (SELECT 1 FROM ai_reviews r WHERE r.target_loop_id = open_loops.id AND r.status = 'pending') THEN 'needs_review' ELSE 'none' END AS review_state, EXISTS (SELECT 1 FROM loop_calendar_links l WHERE l.loop_id = open_loops.id) AS scheduled FROM open_loops WHERE id = ?")
         .bind(id).fetch_optional(pool).await?.ok_or(CoreError::NotFound)?;
-    hydrate_loop(pool, row).await
+    let evidence = load_evidence(pool, cipher, Some(id), false).await?;
+    hydrate_loop(
+        cipher,
+        row,
+        evidence.into_iter().map(|(_, item)| item).collect(),
+    )
+}
+
+async fn load_evidence(
+    pool: &SqlitePool,
+    cipher: &crate::crypto::LocalCipher,
+    loop_id: Option<&str>,
+    hide_demo: bool,
+) -> Result<Vec<(String, Evidence)>, CoreError> {
+    let rows = sqlx::query_as::<_, (String, String, String, String, Vec<u8>, Vec<u8>)>(
+        "SELECT e.loop_id, e.id, e.source_kind, e.occurred_at, e.payload_nonce, e.payload_ciphertext FROM evidence e JOIN open_loops l ON l.id = e.loop_id WHERE (? IS NULL OR e.loop_id = ?) AND (? = 0 OR l.origin != 'demo') ORDER BY e.occurred_at DESC",
+    )
+    .bind(loop_id)
+    .bind(loop_id)
+    .bind(hide_demo)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(
+            |(loop_id, id, source_kind, occurred_at, nonce, ciphertext)| {
+                let payload: crate::types::EvidencePayload = cipher.decrypt(&nonce, &ciphertext)?;
+                Ok((
+                    loop_id,
+                    Evidence {
+                        id,
+                        source_kind,
+                        source_label: payload.source_label,
+                        excerpt: payload.excerpt,
+                        occurred_at,
+                    },
+                ))
+            },
+        )
+        .collect()
 }
 
 pub async fn dashboard(
     pool: &SqlitePool,
+    cipher: &crate::crypto::LocalCipher,
     hide_demo: bool,
     mut provider_calendar_blocks: Vec<CalendarBlock>,
 ) -> Result<Dashboard, CoreError> {
-    let rows = sqlx::query_as::<_, LoopRow>("SELECT id, title, summary, owner, status, priority, due_at, version FROM open_loops WHERE status NOT IN ('done', 'dismissed') AND (? = 0 OR origin != 'demo') ORDER BY priority DESC, updated_at DESC")
+    let rows = sqlx::query_as::<_, LoopRow>("SELECT id, lifecycle, ownership, priority, due_at, version, payload_nonce, payload_ciphertext, CASE WHEN EXISTS (SELECT 1 FROM ai_reviews r WHERE r.target_loop_id = open_loops.id AND r.status = 'pending') THEN 'needs_review' ELSE 'none' END AS review_state, EXISTS (SELECT 1 FROM loop_calendar_links l WHERE l.loop_id = open_loops.id) AS scheduled FROM open_loops WHERE lifecycle = 'active' AND (? = 0 OR origin != 'demo') ORDER BY priority DESC, updated_at DESC")
         .bind(hide_demo)
         .fetch_all(pool).await?;
+    let mut evidence_by_loop: HashMap<String, Vec<Evidence>> = HashMap::new();
+    for (loop_id, evidence) in load_evidence(pool, cipher, None, hide_demo).await? {
+        evidence_by_loop.entry(loop_id).or_default().push(evidence);
+    }
     let mut open_loops = Vec::with_capacity(rows.len());
     for row in rows {
-        open_loops.push(hydrate_loop(pool, row).await?);
+        let evidence = evidence_by_loop.remove(&row.id).unwrap_or_default();
+        open_loops.push(hydrate_loop(cipher, row, evidence)?);
     }
     let mut calendar_blocks = sqlx::query_as::<_, CalendarBlock>("SELECT id, title, start_at, end_at, kind, color, origin, external_id, etag FROM calendar_blocks WHERE (? = 0 OR origin != 'demo') ORDER BY start_at ASC")
         .bind(hide_demo)
@@ -74,9 +147,12 @@ pub async fn dashboard(
     calendar_blocks.sort_by(|left, right| left.start_at.cmp(&right.start_at));
     let waiting = open_loops
         .iter()
-        .filter(|item| item.owner == "them")
+        .filter(|item| item.ownership == "other")
         .count();
-    let mine = open_loops.iter().filter(|item| item.owner == "me").count();
+    let mine = open_loops
+        .iter()
+        .filter(|item| matches!(item.ownership.as_str(), "me" | "shared"))
+        .count();
     let has_reference_context = open_loops.iter().any(|item| item.id == "waiting-manish")
         && open_loops.iter().any(|item| item.id == "waiting-ayush");
     let briefing = if has_reference_context {
@@ -99,7 +175,11 @@ pub async fn dashboard(
     })
 }
 
-pub async fn insert_task(pool: &SqlitePool, input: CreateTaskInput) -> Result<OpenLoop, CoreError> {
+pub async fn insert_task(
+    pool: &SqlitePool,
+    cipher: &crate::crypto::LocalCipher,
+    input: CreateTaskInput,
+) -> Result<OpenLoop, CoreError> {
     let title = input.title.trim();
     if title.is_empty() || title.chars().count() > 240 {
         return Err(CoreError::Validation(
@@ -108,13 +188,24 @@ pub async fn insert_task(pool: &SqlitePool, input: CreateTaskInput) -> Result<Op
     }
     let id = Uuid::new_v4().to_string();
     let now = Local::now().to_rfc3339();
-    sqlx::query("INSERT INTO open_loops (id, title, summary, owner, status, priority, created_at, updated_at) VALUES (?, ?, 'Added directly by you.', 'me', 'open', 50, ?, ?)")
-        .bind(&id).bind(title).bind(&now).bind(&now).execute(pool).await?;
-    find_loop(pool, &id).await
+    let payload = LoopPayload {
+        title: title.to_owned(),
+        summary: "Added directly by you.".to_owned(),
+    };
+    let (nonce, ciphertext) = cipher.encrypt(&payload)?;
+    let (title_nonce, title_ciphertext) = cipher.encrypt(&payload.title)?;
+    let mut transaction = pool.begin().await?;
+    sqlx::query("INSERT INTO open_loops (id, title, summary, owner, status, priority, lifecycle, ownership, payload_nonce, payload_ciphertext, payload_migrated, created_at, updated_at) VALUES (?, 'Encrypted', '', 'me', 'open', 50, 'active', 'me', ?, ?, 1, ?, ?)")
+        .bind(&id).bind(nonce).bind(ciphertext).bind(&now).bind(&now).execute(&mut *transaction).await?;
+    sqlx::query("INSERT INTO loop_derivations (id, loop_id, field_name, source_type, active, value_hash, payload_nonce, payload_ciphertext, created_at) VALUES (?, ?, 'title', 'user', 1, ?, ?, ?, ?)")
+        .bind(Uuid::new_v4().to_string()).bind(&id).bind(cipher.pseudonymous_id("loop:title", &payload.title)).bind(title_nonce).bind(title_ciphertext).bind(&now).execute(&mut *transaction).await?;
+    transaction.commit().await?;
+    find_loop(pool, cipher, &id).await
 }
 
 pub async fn update_status(
     pool: &SqlitePool,
+    cipher: &crate::crypto::LocalCipher,
     input: SetLoopStatusInput,
 ) -> Result<OpenLoop, CoreError> {
     if !matches!(
@@ -125,20 +216,35 @@ pub async fn update_status(
             "Unknown open-loop status.".to_owned(),
         ));
     }
-    let previous: Option<String> = sqlx::query_scalar("SELECT status FROM open_loops WHERE id = ?")
-        .bind(&input.id)
-        .fetch_optional(pool)
-        .await?;
+    let lifecycle = match input.status.as_str() {
+        "open" | "waiting" => "active",
+        "done" => "resolved",
+        "dismissed" => "dismissed",
+        _ => unreachable!(),
+    };
+    let ownership = if input.status == "waiting" {
+        "other"
+    } else {
+        "me"
+    };
+    let previous: Option<String> =
+        sqlx::query_scalar("SELECT lifecycle FROM open_loops WHERE id = ?")
+            .bind(&input.id)
+            .fetch_optional(pool)
+            .await?;
     let previous = previous.ok_or(CoreError::NotFound)?;
     let now = Local::now().to_rfc3339();
-    let updated = sqlx::query("UPDATE open_loops SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
-        .bind(&input.status).bind(&now).bind(&input.id).bind(input.expected_version).execute(pool).await?;
+    let updated = sqlx::query("UPDATE open_loops SET status = ?, owner = ?, lifecycle = ?, ownership = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
+        .bind(&input.status).bind(if ownership == "other" { "them" } else { "me" }).bind(lifecycle).bind(ownership).bind(&now).bind(&input.id).bind(input.expected_version).execute(pool).await?;
     if updated.rows_affected() == 0 {
         return Err(CoreError::Conflict);
     }
-    sqlx::query("INSERT INTO loop_transitions (id, loop_id, from_status, to_status, reason, created_at) VALUES (?, ?, ?, ?, 'user_action', ?)")
-        .bind(Uuid::new_v4().to_string()).bind(&input.id).bind(previous).bind(&input.status).bind(now).execute(pool).await?;
-    find_loop(pool, &input.id).await
+    let (reason_nonce, reason_ciphertext) = cipher.encrypt(&TransitionPayload {
+        reason: "user_action".to_owned(),
+    })?;
+    sqlx::query("INSERT INTO loop_transitions (id, loop_id, from_status, to_status, reason, payload_nonce, payload_ciphertext, payload_migrated, created_at) VALUES (?, ?, ?, ?, 'encrypted', ?, ?, 1, ?)")
+        .bind(Uuid::new_v4().to_string()).bind(&input.id).bind(previous).bind(&input.status).bind(reason_nonce).bind(reason_ciphertext).bind(now).execute(pool).await?;
+    find_loop(pool, cipher, &input.id).await
 }
 
 pub async fn insert_calendar_block(
@@ -189,7 +295,7 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<Dashboard, Stri
     } else {
         Vec::new()
     };
-    dashboard(&state.pool, connected, provider_blocks)
+    dashboard(&state.pool, &state.cipher, connected, provider_blocks)
         .await
         .map_err(public_error)
 }
@@ -199,7 +305,9 @@ pub async fn create_task(
     state: State<'_, AppState>,
     input: CreateTaskInput,
 ) -> Result<OpenLoop, String> {
-    insert_task(&state.pool, input).await.map_err(public_error)
+    insert_task(&state.pool, &state.cipher, input)
+        .await
+        .map_err(public_error)
 }
 
 #[tauri::command]
@@ -207,7 +315,7 @@ pub async fn set_loop_status(
     state: State<'_, AppState>,
     input: SetLoopStatusInput,
 ) -> Result<OpenLoop, String> {
-    update_status(&state.pool, input)
+    update_status(&state.pool, &state.cipher, input)
         .await
         .map_err(public_error)
 }
@@ -289,8 +397,8 @@ mod tests {
 
     #[tokio::test]
     async fn dashboard_has_seeded_evidence_backed_loops() {
-        let pool = db::memory_pool().await;
-        let result = dashboard(&pool, false, Vec::new()).await.unwrap();
+        let (pool, cipher) = db::memory_secure().await;
+        let result = dashboard(&pool, &cipher, false, Vec::new()).await.unwrap();
         assert_eq!(result.open_loops.len(), 5);
         assert!(result
             .open_loops
@@ -300,9 +408,10 @@ mod tests {
 
     #[tokio::test]
     async fn status_updates_use_optimistic_concurrency() {
-        let pool = db::memory_pool().await;
+        let (pool, cipher) = db::memory_secure().await;
         let updated = update_status(
             &pool,
+            &cipher,
             SetLoopStatusInput {
                 id: "mail-receipt".into(),
                 status: "done".into(),
@@ -314,6 +423,7 @@ mod tests {
         assert_eq!(updated.status, "done");
         let conflict = update_status(
             &pool,
+            &cipher,
             SetLoopStatusInput {
                 id: "mail-receipt".into(),
                 status: "open".into(),
@@ -326,9 +436,10 @@ mod tests {
 
     #[tokio::test]
     async fn connected_dashboard_hides_demo_but_preserves_local_items() {
-        let pool = db::memory_pool().await;
+        let (pool, cipher) = db::memory_secure().await;
         let local = insert_task(
             &pool,
+            &cipher,
             CreateTaskInput {
                 title: "Keep this local task".into(),
             },
@@ -346,7 +457,9 @@ mod tests {
             external_id: Some("event-1".into()),
             etag: Some("v1".into()),
         };
-        let result = dashboard(&pool, true, vec![google_block]).await.unwrap();
+        let result = dashboard(&pool, &cipher, true, vec![google_block])
+            .await
+            .unwrap();
         assert_eq!(result.open_loops.len(), 1);
         assert_eq!(result.open_loops[0].id, local.id);
         assert_eq!(result.calendar_blocks.len(), 1);

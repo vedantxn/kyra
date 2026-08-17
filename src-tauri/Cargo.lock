@@ -2539,6 +2539,8 @@ dependencies = [
  "chrono",
  "dotenvy",
  "futures",
+ "hex",
+ "hmac 0.12.1",
  "html2text",
  "keyring",
  "reqwest",
