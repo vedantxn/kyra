@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, AlertCircle, Bot, CalendarDays, Check, ChevronDown, Circle, Cloud, KeyRound, ListTodo, RefreshCw, RotateCcw, Search, Server, ShieldCheck, Sparkles, Unplug, X } from "lucide-react";
+import { Activity, AlertCircle, ArrowRight, Bot, CalendarDays, Check, CheckCircle2, ChevronDown, Circle, Cloud, KeyRound, ListTodo, LoaderCircle, Mail, RefreshCw, RotateCcw, Search, Server, Settings, ShieldCheck, Sparkles, Unplug, X } from "lucide-react";
 import {
   clearAiProvider,
   connectGoogle,
@@ -28,6 +28,7 @@ import {
 } from "./api";
 import { parseCommand } from "./command";
 import type { AiActivity, AiCommandResult, AiEngineStatus, AiProvider, AiReview, CalendarBlock, Dashboard, GoogleConnectorStatus, OpenLoop, SaveAiProviderConfigInput } from "./contracts";
+import { readSetupPreference, shouldShowSetup, writeSetupPreference } from "./setup";
 
 const formatDay = (iso: string) => {
   const date = new Date(iso);
@@ -308,6 +309,101 @@ function formatSyncTime(value?: string | null) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+export function SetupFlow({
+  status,
+  busy,
+  error,
+  onConnect,
+  onFinish,
+  onExplore,
+  onClose,
+}: {
+  status: GoogleConnectorStatus;
+  busy: boolean;
+  error: string;
+  onConnect: () => Promise<void>;
+  onFinish: () => void;
+  onExplore: () => void;
+  onClose: () => void;
+}) {
+  const [started, setStarted] = useState(status.state === "connecting" || status.state === "syncing");
+  const ready = status.state === "connected" && Boolean(status.lastSyncAt);
+  const working = busy || status.state === "connecting" || status.state === "syncing";
+  const failed = started && !working && !ready && Boolean(error || status.lastError);
+
+  const begin = async () => {
+    setStarted(true);
+    await onConnect();
+  };
+
+  return (
+    <div className="setup-backdrop">
+      <section className="setup-dialog" aria-label="Set up Kyra">
+        <button className="setup-close" onClick={onClose} disabled={working} aria-label="Close setup"><X size={17} /></button>
+        {ready ? (
+          <div className="setup-ready">
+            <span className="setup-success"><CheckCircle2 size={26} /></span>
+            <p className="setup-kicker">WORKSPACE CONNECTED</p>
+            <h1>Your real day is ready.</h1>
+            <p className="setup-lede">Kyra has finished the first import for <strong>{status.accountEmail}</strong>. Demo events are now out of the way.</p>
+            <dl className="setup-counts">
+              <div><dt>Gmail</dt><dd>{status.gmailMessageCount}<span>messages indexed</span></dd></div>
+              <div><dt>Calendar</dt><dd>{status.calendarEventCount}<span>events synchronized</span></dd></div>
+            </dl>
+            <p className="setup-last-sync">Last synchronized {formatSyncTime(status.lastSyncAt)}</p>
+            <button className="setup-primary" onClick={onFinish}>Open Kyra <ArrowRight size={15} /></button>
+            <p className="setup-footnote">Kyra refreshes Google every five minutes while the app is open. Intelligence can be configured later in Settings.</p>
+          </div>
+        ) : working ? (
+          <div className="setup-working" aria-live="polite">
+            <span className="setup-loader"><LoaderCircle size={28} /></span>
+            <p className="setup-kicker">{status.state === "syncing" ? "IMPORTING YOUR WORKSPACE" : "WAITING FOR GOOGLE"}</p>
+            <h1>{status.state === "syncing" ? "Bringing your day into focus." : "Finish connecting in your browser."}</h1>
+            <p className="setup-lede">{status.state === "syncing" ? "Kyra is securely importing Gmail and your primary Calendar. Keep this window open for the first sync." : "Google opened in your system browser. Choose your test account and approve the requested access, then return here."}</p>
+            <div className="setup-progress">
+              <div className={status.accountEmail ? "complete" : "active"}>{status.accountEmail ? <Check size={15} /> : <LoaderCircle size={15} />}<span><strong>Google account</strong><small>{status.accountEmail ?? "Authorization in progress"}</small></span></div>
+              <div className={status.state === "syncing" ? "active" : "pending"}>{status.state === "syncing" ? <LoaderCircle size={15} /> : <Circle size={15} />}<span><strong>Gmail</strong><small>Inbox + Sent, last 30 days, up to 500 messages</small></span></div>
+              <div className={status.state === "syncing" ? "active" : "pending"}>{status.state === "syncing" ? <LoaderCircle size={15} /> : <Circle size={15} />}<span><strong>Primary Calendar</strong><small>30 days back through 90 days ahead</small></span></div>
+            </div>
+            <p className="setup-footnote">Nothing is sent or deleted from Gmail. Closing this screen is disabled while the secure connection is in progress.</p>
+          </div>
+        ) : failed ? (
+          <div className="setup-error-state">
+            <span className="setup-error-icon"><AlertCircle size={24} /></span>
+            <p className="setup-kicker">CONNECTION NEEDS ATTENTION</p>
+            <h1>Google did not connect.</h1>
+            <p className="setup-lede">{error || status.lastError}</p>
+            <button className="setup-primary" onClick={() => void begin()}>Try again <RefreshCw size={14} /></button>
+            <button className="setup-secondary" onClick={onExplore}>Use the sample day for now</button>
+            <p className="setup-footnote">Your local tasks are untouched. You can return to this guide from Settings.</p>
+          </div>
+        ) : (
+          <>
+            <div className="setup-intro">
+              <div className="setup-heading">
+                <div className="setup-brand"><Logo /><span>Night</span></div>
+                <p className="setup-kicker">SET UP KYRA ON THIS MAC</p>
+                <h1>Bring your real day into one calm view.</h1>
+                <p className="setup-lede">Connect Google once. Kyra will import the work already moving through your inbox and calendar, then keep it current while the app is open.</p>
+              </div>
+              <div className="setup-access" aria-label="Google access summary">
+                <div><span><Mail size={17} /></span><p><strong>Gmail is read-only</strong><small>Inbox + Sent from the last 30 days, up to 500 messages. Kyra cannot send or delete mail.</small></p></div>
+                <div><span><CalendarDays size={17} /></span><p><strong>Your primary Calendar</strong><small>Events from 30 days ago through 90 days ahead. Kyra can create and update events when you ask.</small></p></div>
+                <div><span><ShieldCheck size={17} /></span><p><strong>Protected on this Mac</strong><small>Provider content is encrypted before SQLite. Refresh tokens and encryption keys stay in macOS Keychain.</small></p></div>
+              </div>
+            </div>
+            <div className="setup-actions">
+              <button className="setup-primary" onClick={() => void begin()}>Connect Gmail & Calendar <ArrowRight size={15} /></button>
+              <button className="setup-secondary" onClick={onExplore}>Explore with sample data</button>
+            </div>
+            <p className="setup-footnote">Google will open in your system browser. Kyra uses a desktop OAuth flow and never embeds a client secret.</p>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export function ConnectionsSheet({
   status,
   ai,
@@ -323,6 +419,7 @@ export function ConnectionsSheet({
   onRunAi,
   onClearAi,
   onDiscoverOllama,
+  onOpenSetup,
 }: {
   status: GoogleConnectorStatus;
   ai: AiEngineStatus;
@@ -338,6 +435,7 @@ export function ConnectionsSheet({
   onRunAi: () => Promise<void>;
   onClearAi: (provider: AiProvider) => Promise<void>;
   onDiscoverOllama: (baseUrl: string) => Promise<string[]>;
+  onOpenSetup: () => void;
 }) {
   const connected = status.state !== "disconnected";
   const [provider, setProvider] = useState<AiProvider>(ai.provider ?? "ollama");
@@ -369,10 +467,10 @@ export function ConnectionsSheet({
 
   return (
     <div className="connections-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="connections-sheet" aria-label="Connections">
+      <section className="connections-sheet" aria-label="Settings">
         <header>
-          <div><span>SETUP</span><h2>Connections</h2></div>
-          <button onClick={onClose} aria-label="Close connections"><X size={17} /></button>
+          <div><span>KYRA ON THIS MAC</span><h2>Settings</h2></div>
+          <button onClick={onClose} aria-label="Close settings"><X size={17} /></button>
         </header>
         <article className="connection-card">
           <div className="connection-provider"><Cloud size={18} /><div><h3>Google</h3><p>{status.accountEmail ?? "Gmail and primary Calendar"}</p></div><span className={`connection-state ${status.state}`}>{connectorLabels[status.state]}</span></div>
@@ -391,10 +489,11 @@ export function ConnectionsSheet({
             </>
           ) : (
             <>
-              <p className="connection-copy">Synchronize the last 30 days of Inbox and Sent mail, and use Kyra as a real Google Calendar client. Provider content stays encrypted on this Mac.</p>
+              <p className="connection-copy">Bring in the last 30 days of Inbox and Sent mail, plus your primary Calendar. The guided setup explains every permission before Google opens.</p>
               {error && <p className="connection-error">{error}</p>}
-              <button className="connect-button" disabled={busy} onClick={onConnect}>{busy ? "Waiting for Google…" : "Connect Google"}</button>
-              <small>Google opens in your browser. Kyra never stores a client secret.</small>
+              <button className="connect-button" disabled={busy} onClick={onOpenSetup}>Open guided setup</button>
+              <button className="connection-text-action" disabled={busy} onClick={onConnect}>{busy ? "Waiting for Google…" : "Connect directly"}</button>
+              <small>Google opens in your browser. Provider content is encrypted on this Mac.</small>
             </>
           )}
         </article>
@@ -480,6 +579,7 @@ export default function App() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [connector, setConnector] = useState<GoogleConnectorStatus>({ state: "disconnected", gmailMessageCount: 0, calendarEventCount: 0 });
   const [aiEngine, setAiEngine] = useState<AiEngineStatus>({ state: "disconnected", queuedJobs: 0, runningJobs: 0, failedJobs: 0, reviewCount: 0 });
@@ -491,11 +591,20 @@ export default function App() {
   const [aiError, setAiError] = useState("");
   const [activityError, setActivityError] = useState("");
   const [error, setError] = useState("");
+  const setupEvaluated = useRef(false);
 
   useEffect(() => {
     const load = () => {
       void Promise.all([getDashboard(), getGoogleConnectorStatus(), getAiEngineStatus()])
-        .then(([nextDashboard, nextConnector, nextAi]) => { setDashboard(nextDashboard); setConnector(nextConnector); setAiEngine(nextAi); })
+        .then(([nextDashboard, nextConnector, nextAi]) => {
+          setDashboard(nextDashboard);
+          setConnector(nextConnector);
+          setAiEngine(nextAi);
+          if (!setupEvaluated.current) {
+            setupEvaluated.current = true;
+            setSetupOpen(shouldShowSetup(nextConnector, readSetupPreference()));
+          }
+        })
         .catch((cause) => setError(String(cause)));
     };
     load();
@@ -531,13 +640,14 @@ export default function App() {
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (activityOpen) setActivityOpen(false);
+      else if (setupOpen && !connectorBusy) setSetupOpen(false);
       else if (connectionsOpen) setConnectionsOpen(false);
       else if (plannerOpen) setPlannerOpen(false);
       else void hideOverlay();
     };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
-  }, [activityOpen, connectionsOpen, plannerOpen]);
+  }, [activityOpen, connectorBusy, connectionsOpen, plannerOpen, setupOpen]);
 
   const visibleLoops = useMemo(
     () => dashboard?.openLoops.filter((loop) => loop.status !== "done" && loop.status !== "dismissed") ?? [],
@@ -589,13 +699,21 @@ export default function App() {
     setConnectorBusy(true);
     setConnectorError("");
     setConnector((current) => ({ ...current, state: "connecting" }));
+    const statusPoll = window.setInterval(() => {
+      void getGoogleConnectorStatus().then((next) => {
+        if (next.state === "syncing" || next.state === "connecting") setConnector(next);
+      }).catch(() => undefined);
+    }, 750);
     try {
-      setConnector(await connectGoogle());
+      const next = await connectGoogle();
+      setConnector(next);
+      writeSetupPreference("completed");
       await refreshNativeState();
     } catch (cause) {
       setConnectorError(cause instanceof Error ? cause.message : String(cause));
       setConnector(await getGoogleConnectorStatus());
     } finally {
+      window.clearInterval(statusPoll);
       setConnectorBusy(false);
     }
   };
@@ -758,6 +876,16 @@ export default function App() {
   const systemState = aiEngine.reviewCount > 0 ? "review" : aiEngine.state === "ready" ? connector.state : aiEngine.state;
   const systemTitle = aiEngine.reviewCount > 0 ? `${aiEngine.reviewCount} AI review${aiEngine.reviewCount === 1 ? "" : "s"} waiting` : `Google: ${connectorLabels[connector.state]} · AI: ${aiLabels[aiEngine.state]}`;
 
+  const finishSetup = () => {
+    writeSetupPreference("completed");
+    setSetupOpen(false);
+  };
+
+  const exploreSample = () => {
+    writeSetupPreference("skipped");
+    setSetupOpen(false);
+  };
+
   return (
     <main className="app-shell">
       <Timeline blocks={dashboard.calendarBlocks} now={dashboard.now} onExpand={() => setPlannerOpen(true)} />
@@ -770,11 +898,14 @@ export default function App() {
       </section>
       <Loops loops={dashboard.openLoops} onComplete={complete} />
       <span className="loop-count">{37 + Math.max(0, visibleLoops.length - 5)}</span>
-      <button className={`status-dot ${systemState}`} title={systemTitle} aria-label="Open connections" onClick={() => setConnectionsOpen(true)} />
-      <button className="activity-trigger" aria-label="Open AI activity" onClick={() => { setActivityOpen(true); void refreshAiActivity(); }}><Activity size={14} />{aiEngine.reviewCount > 0 && <span>{aiEngine.reviewCount}</span>}</button>
+      <div className="utility-actions">
+        <button className="activity-trigger" aria-label="Open AI activity" onClick={() => { setActivityOpen(true); void refreshAiActivity(); }}><Activity size={14} />{aiEngine.reviewCount > 0 && <span>{aiEngine.reviewCount}</span>}</button>
+        <button className={`settings-trigger ${systemState}`} title={systemTitle} aria-label="Open settings" onClick={() => setConnectionsOpen(true)}><i /><Settings size={13} /><span>{connector.state === "disconnected" ? "Set up" : connector.state === "reconnect_required" ? "Reconnect" : "Settings"}</span></button>
+      </div>
       {plannerOpen && <Planner blocks={dashboard.calendarBlocks} showDemo={connector.state === "disconnected"} onClose={() => setPlannerOpen(false)} />}
-      {connectionsOpen && <ConnectionsSheet status={connector} ai={aiEngine} busy={connectorBusy || aiBusy} error={connectorError} aiError={aiError} onClose={() => setConnectionsOpen(false)} onConnect={() => void connect()} onSync={() => void syncConnector()} onDisconnect={() => void disconnect()} onSaveAi={saveAi} onActivateAi={activateAi} onRunAi={runAi} onClearAi={clearAi} onDiscoverOllama={discoverOllama} />}
+      {connectionsOpen && <ConnectionsSheet status={connector} ai={aiEngine} busy={connectorBusy || aiBusy} error={connectorError} aiError={aiError} onClose={() => setConnectionsOpen(false)} onConnect={() => void connect()} onSync={() => void syncConnector()} onDisconnect={() => void disconnect()} onSaveAi={saveAi} onActivateAi={activateAi} onRunAi={runAi} onClearAi={clearAi} onDiscoverOllama={discoverOllama} onOpenSetup={() => { setConnectionsOpen(false); setConnectorError(""); setSetupOpen(true); }} />}
       {activityOpen && <ActivitySheet reviews={reviews} activity={activityItems} busy={aiBusy} error={activityError} onClose={() => setActivityOpen(false)} onResolve={resolveReview} onRevert={revertAction} onRetry={retryJob} />}
+      {setupOpen && <SetupFlow status={connector} busy={connectorBusy} error={connectorError} onClose={() => setSetupOpen(false)} onConnect={connect} onFinish={finishSetup} onExplore={exploreSample} />}
     </main>
   );
 }

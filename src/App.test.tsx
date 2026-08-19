@@ -1,9 +1,12 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConnectionsSheet } from "./App";
+import { ConnectionsSheet, SetupFlow } from "./App";
 import type { AiEngineStatus, GoogleConnectorStatus } from "./contracts";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 const actions = {
   onClose: vi.fn(),
@@ -15,6 +18,7 @@ const actions = {
   onRunAi: vi.fn(),
   onClearAi: vi.fn(),
   onDiscoverOllama: vi.fn().mockResolvedValue([]),
+  onOpenSetup: vi.fn(),
 };
 
 const ai: AiEngineStatus = {
@@ -91,5 +95,67 @@ describe("Connections sheet", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Leave blank to keep saved key")).toHaveValue("");
     expect(screen.getByRole("button", { name: /Test & activate/ })).toBeEnabled();
+  });
+
+  it("offers the guided setup from the disconnected settings state", () => {
+    render(
+      <ConnectionsSheet
+        {...actions}
+        status={status("disconnected")}
+        ai={ai}
+        busy={false}
+        error=""
+        aiError=""
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open guided setup" }));
+    expect(actions.onOpenSetup).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Connect directly" })).toBeEnabled();
+  });
+});
+
+describe("First-run setup", () => {
+  const setupActions = {
+    onConnect: vi.fn().mockResolvedValue(undefined),
+    onFinish: vi.fn(),
+    onExplore: vi.fn(),
+    onClose: vi.fn(),
+  };
+
+  it("explains Google access before asking for authorization", () => {
+    render(<SetupFlow {...setupActions} status={status("disconnected")} busy={false} error="" />);
+    expect(screen.getByRole("heading", { name: "Bring your real day into one calm view." })).toBeInTheDocument();
+    expect(screen.getByText("Gmail is read-only")).toBeInTheDocument();
+    expect(screen.getByText("Your primary Calendar")).toBeInTheDocument();
+    expect(screen.getByText("Protected on this Mac")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Connect Gmail & Calendar/ }));
+    expect(setupActions.onConnect).toHaveBeenCalledOnce();
+  });
+
+  it("shows an honest wait state while Google authorization is open", () => {
+    render(<SetupFlow {...setupActions} status={{ ...status("connecting"), accountEmail: undefined }} busy error="" />);
+    expect(screen.getByRole("heading", { name: "Finish connecting in your browser." })).toBeInTheDocument();
+    expect(screen.getByText("Authorization in progress")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close setup" })).toBeDisabled();
+  });
+
+  it("shows synchronized counts before finishing", () => {
+    render(<SetupFlow {...setupActions} status={status("connected")} busy={false} error="" />);
+    expect(screen.getByRole("heading", { name: "Your real day is ready." })).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Open Kyra/ }));
+    expect(setupActions.onFinish).toHaveBeenCalledOnce();
+  });
+
+  it("keeps configuration failures actionable and recoverable", async () => {
+    const { rerender } = render(<SetupFlow {...setupActions} status={status("disconnected")} busy={false} error="" />);
+    fireEvent.click(screen.getByRole("button", { name: /Connect Gmail & Calendar/ }));
+    rerender(<SetupFlow {...setupActions} status={status("disconnected")} busy={false} error="Add KYRA_GOOGLE_CLIENT_ID to .env.local before connecting Google." />);
+    expect(await screen.findByRole("heading", { name: "Google did not connect." })).toBeInTheDocument();
+    expect(screen.getByText(/KYRA_GOOGLE_CLIENT_ID/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use the sample day for now" }));
+    expect(setupActions.onExplore).toHaveBeenCalledOnce();
   });
 });
