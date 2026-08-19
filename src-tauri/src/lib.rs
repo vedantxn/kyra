@@ -7,6 +7,8 @@ mod types;
 
 use sqlx::SqlitePool;
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
+use tauri::window::{Effect, EffectState, EffectsBuilder};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -67,6 +69,14 @@ pub fn run() {
             });
             app.global_shortcut().register(command_k)?;
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                window.set_effects(
+                    EffectsBuilder::new()
+                        .effect(Effect::UnderWindowBackground)
+                        .state(EffectState::Active)
+                        .build(),
+                )?;
+                window.maximize()?;
                 window.show()?;
                 window.set_focus()?;
             }
@@ -108,6 +118,7 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
+                    let _ = window.maximize();
                     let _ = window.set_focus();
                 }
             }

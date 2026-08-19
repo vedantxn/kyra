@@ -19,13 +19,14 @@
         "height": 900,
         "minWidth": 960,
         "minHeight": 680,
-        "center": true,
+        "center": false,
+        "maximized": true,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
         "resizable": true,
         "fullscreen": false,
-        "shadow": true,
+        "shadow": false,
         "visible": true
       }
     ],
