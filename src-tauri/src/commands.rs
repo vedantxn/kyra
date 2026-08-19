@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{DateTime, Local};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -7,8 +8,8 @@ use uuid::Uuid;
 use crate::{
     ai::types::{
         ActivationReport, AiActivityItem, AiCommandInput, AiCommandResult, AiEngineStatus,
-        AiProvider, AiReviewItem, OllamaModel, ResolveAiReviewInput, RevertAiActionResult,
-        SaveAiProviderConfigInput,
+        AiProvider, AiReviewItem, BriefingFactVersion, BriefingSnapshot, EncryptedAppValue,
+        OllamaModel, ResolveAiReviewInput, RevertAiActionResult, SaveAiProviderConfigInput,
     },
     types::{
         CalendarBlock, CalendarMutationInput, CalendarMutationResult, CreateCalendarBlockInput,
@@ -160,7 +161,7 @@ pub async fn dashboard(
         .count();
     let has_reference_context = open_loops.iter().any(|item| item.id == "waiting-manish")
         && open_loops.iter().any(|item| item.id == "waiting-ayush");
-    let briefing = if has_reference_context {
+    let deterministic_briefing = if has_reference_context {
         "Manish and Ayush still owe you the video edits and the write-up, while the 83(b) mailing to Phalanshu and RC's update on the pitch are still on you.".to_owned()
     } else {
         match (waiting, mine) {
@@ -169,6 +170,37 @@ pub async fn dashboard(
             (waiting, 0) => format!("{waiting} open loops are waiting on other people. You have no active follow-ups on your side."),
             (waiting, mine) => format!("{waiting} open loops are waiting on other people, while {mine} are still on you. Start with the highest-priority commitment."),
         }
+    };
+    let fact_version_hash = crate::ai::types::briefing_fact_version_hash(
+        open_loops
+            .iter()
+            .map(|item| BriefingFactVersion {
+                loop_id: item.id.clone(),
+                version: item.version,
+                ownership: item.ownership.clone(),
+                priority: item.priority,
+                due_at: item.due_at.clone(),
+                review_state: item.review_state.clone(),
+                scheduled: item.scheduled,
+            })
+            .collect(),
+    );
+    let briefing = match sqlx::query_scalar::<_, String>(
+        "SELECT value FROM app_meta WHERE key = 'ai_latest_briefing'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .and_then(|value| serde_json::from_str::<EncryptedAppValue>(&value).ok())
+    .and_then(|value| {
+        Some((
+            BASE64.decode(value.nonce).ok()?,
+            BASE64.decode(value.ciphertext).ok()?,
+        ))
+    })
+    .and_then(|(nonce, ciphertext)| cipher.decrypt::<BriefingSnapshot>(&nonce, &ciphertext).ok())
+    {
+        Some(snapshot) if snapshot.fact_version_hash == fact_version_hash => snapshot.text,
+        _ => deterministic_briefing,
     };
     let now = Local::now();
     Ok(Dashboard {

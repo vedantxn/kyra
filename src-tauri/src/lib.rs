@@ -96,6 +96,20 @@ pub fn run() {
             commands::retry_ai_job,
             commands::revert_ai_action,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Kyra");
+        .build(tauri::generate_context!())
+        .expect("error while building Kyra")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = event
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }

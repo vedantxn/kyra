@@ -303,6 +303,8 @@ kbd {
 .loop-check:hover { color: rgba(161, 218, 147, 0.85); }
 .loop-card h3 { margin: 0 0 5px; color: rgba(245, 248, 245, 0.88); font-size: 15.5px; font-weight: 650; line-height: 1.34; }
 .loop-card p { margin: 0; color: rgba(225, 237, 235, 0.4); font-size: 11.5px; font-weight: 500; line-height: 1.48; }
+.loop-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.loop-meta span { padding: 2px 6px; border: 1px solid rgba(232, 233, 225, 0.08); border-radius: 99px; color: rgba(229, 230, 222, 0.38); font-size: 8px; letter-spacing: 0.03em; }
 .empty-state { display: flex; align-items: center; gap: 8px; margin-left: 28px; color: rgba(225, 240, 238, 0.45); font-size: 12px; }
 
 .loop-count {
@@ -334,6 +336,28 @@ kbd {
 .status-dot.disconnected { background: rgba(221, 222, 213, 0.34); box-shadow: none; }
 .status-dot.connecting, .status-dot.syncing { background: #cab77d; box-shadow: 0 0 10px rgba(202, 183, 125, 0.62); animation: status-pulse 1.2s ease-in-out infinite; }
 .status-dot.error, .status-dot.reconnect_required { background: #c98372; box-shadow: 0 0 10px rgba(201, 131, 114, 0.56); }
+.status-dot.testing, .status-dot.running { background: #cab77d; box-shadow: 0 0 10px rgba(202, 183, 125, 0.62); animation: status-pulse 1.2s ease-in-out infinite; }
+.status-dot.paused, .status-dot.blocked, .status-dot.error { background: #c98372; box-shadow: 0 0 10px rgba(201, 131, 114, 0.56); }
+.status-dot.review { background: #d6a567; box-shadow: 0 0 12px rgba(214, 165, 103, 0.68); }
+
+.activity-trigger {
+  position: absolute;
+  top: 18px;
+  right: 47px;
+  z-index: 4;
+  display: grid;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(233, 234, 225, 0.32);
+  cursor: pointer;
+  place-items: center;
+}
+.activity-trigger:hover { border-color: rgba(233, 234, 225, 0.1); color: rgba(245, 246, 238, 0.72); background: rgba(233, 234, 225, 0.04); }
+.activity-trigger span { position: absolute; top: -3px; right: -3px; display: grid; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 99px; background: #b88159; color: #fff9ee; font-size: 8px; font-weight: 700; place-items: center; }
 
 @keyframes status-pulse { 50% { opacity: 0.38; } }
 
@@ -355,6 +379,9 @@ kbd {
   border-radius: 18px;
   background: rgba(29, 30, 27, 0.96);
   box-shadow: 0 32px 82px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.025);
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  scrollbar-width: none;
 }
 
 .connections-sheet header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
@@ -364,6 +391,7 @@ kbd {
 .connections-sheet header button:hover { background: rgba(235, 236, 228, 0.06); color: rgba(247, 248, 241, 0.82); }
 
 .connection-card { padding: 18px; border: 1px solid rgba(234, 235, 227, 0.09); border-radius: 14px; background: rgba(238, 239, 230, 0.025); }
+.connection-card + .connection-card { margin-top: 12px; }
 .connection-provider { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; }
 .connection-provider > svg { color: rgba(238, 239, 231, 0.56); }
 .connection-provider h3 { margin: 0; color: rgba(247, 248, 241, 0.9); font-size: 14px; font-weight: 650; }
@@ -372,6 +400,9 @@ kbd {
 .connection-state.connected { background: rgba(140, 164, 129, 0.14); color: rgba(183, 204, 173, 0.86); }
 .connection-state.error, .connection-state.reconnect_required { background: rgba(201, 131, 114, 0.12); color: rgba(224, 161, 146, 0.86); }
 .connection-state.syncing, .connection-state.connecting { color: rgba(218, 201, 146, 0.9); }
+.connection-state.ready { background: rgba(140, 164, 129, 0.14); color: rgba(183, 204, 173, 0.86); }
+.connection-state.testing, .connection-state.running { color: rgba(218, 201, 146, 0.9); }
+.connection-state.paused, .connection-state.blocked, .connection-state.error { background: rgba(201, 131, 114, 0.12); color: rgba(224, 161, 146, 0.86); }
 
 .connection-copy { margin: 20px 0 16px; color: rgba(230, 231, 223, 0.5); font-size: 12px; line-height: 1.55; }
 .connection-card dl { margin: 20px 0 4px; }
@@ -389,6 +420,40 @@ kbd {
 .connection-actions button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 12px; }
 .connection-actions .primary { flex: 1; }
 .connection-actions .disconnect { background: transparent; color: rgba(226, 158, 142, 0.8); }
+.ai-config-grid { display: grid; grid-template-columns: 1fr 1.35fr; gap: 10px; margin-top: 18px; }
+.ai-config-grid label { display: flex; flex-direction: column; gap: 6px; color: rgba(229, 230, 222, 0.37); font-size: 9px; font-weight: 650; letter-spacing: 0.04em; }
+.ai-config-grid label.wide { grid-column: 1 / -1; }
+.ai-config-grid input, .ai-config-grid select { width: 100%; height: 34px; padding: 0 9px; border: 1px solid rgba(236, 237, 229, 0.1); border-radius: 8px; outline: none; background: rgba(4, 5, 4, 0.2); color: rgba(247, 248, 241, 0.84); font-size: 10px; }
+.ai-config-grid input:focus, .ai-config-grid select:focus { border-color: rgba(199, 203, 188, 0.3); }
+.input-action { display: flex; align-items: center; gap: 7px; height: 34px; padding-left: 9px; border: 1px solid rgba(236, 237, 229, 0.1); border-radius: 8px; background: rgba(4, 5, 4, 0.2); }
+.input-action > svg { flex: 0 0 auto; color: rgba(230, 231, 223, 0.34); }
+.input-action input { height: 32px; padding-left: 0; border: 0; background: transparent; }
+.input-action button { height: 25px; margin-right: 4px; padding: 0 8px; border: 1px solid rgba(236, 237, 229, 0.1); border-radius: 6px; background: rgba(235, 236, 228, 0.06); color: rgba(241, 242, 234, 0.65); font-size: 9px; cursor: pointer; }
+.ai-stats { margin-top: 14px !important; }
+.ai-actions { flex-wrap: wrap; }
+.ai-actions .primary { min-width: 138px; }
+.clear-provider { width: 100%; margin-top: 9px; border: 0; background: transparent; color: rgba(226, 158, 142, 0.58); font-size: 9px; cursor: pointer; }
+.clear-provider:hover { color: rgba(232, 169, 155, 0.9); }
+
+.activity-sheet { width: min(450px, calc(100vw - 36px)); }
+.activity-scroll { max-height: calc(100vh - 125px); overflow: auto; scrollbar-width: none; }
+.activity-section-title { display: flex; align-items: center; justify-content: space-between; margin: 0 0 10px; color: rgba(241, 242, 234, 0.68); font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.activity-section-title b { display: grid; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 99px; background: rgba(214, 165, 103, 0.14); color: rgba(224, 184, 132, 0.88); font-size: 9px; place-items: center; }
+.activity-section-title.recent { margin-top: 24px; }
+.activity-empty { display: flex; align-items: center; gap: 7px; margin: 0; padding: 13px; border: 1px dashed rgba(234, 235, 227, 0.08); border-radius: 10px; color: rgba(229, 230, 222, 0.35); font-size: 10px; }
+.review-card, .activity-card { padding: 14px; border: 1px solid rgba(234, 235, 227, 0.08); border-radius: 12px; background: rgba(238, 239, 230, 0.02); }
+.review-card + .review-card, .activity-card + .activity-card { margin-top: 8px; }
+.review-title { display: flex; align-items: flex-start; gap: 9px; }
+.review-title > svg { margin-top: 2px; color: rgba(214, 165, 103, 0.78); }
+.review-card h4, .activity-card h4 { margin: 0 0 4px; color: rgba(247, 248, 241, 0.87); font-size: 12px; }
+.review-card p, .activity-card p { margin: 0; color: rgba(229, 230, 222, 0.42); font-size: 10px; line-height: 1.5; }
+.review-card blockquote { margin: 11px 0 0; padding: 8px 10px; border-left: 2px solid rgba(204, 188, 148, 0.34); background: rgba(235, 236, 228, 0.025); color: rgba(236, 237, 229, 0.54); font: 400 10px/1.5 "Iowan Old Style", Baskerville, Georgia, serif; }
+.irreversible { margin-top: 8px !important; color: rgba(224, 161, 146, 0.72) !important; }
+.review-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 12px; }
+.review-actions button, .activity-card button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; padding: 0 10px; border: 1px solid rgba(238, 239, 231, 0.1); border-radius: 7px; background: transparent; color: rgba(241, 242, 234, 0.58); font-size: 9px; cursor: pointer; }
+.review-actions button.primary { background: rgba(237, 238, 230, 0.09); color: rgba(249, 249, 243, 0.86); }
+.activity-card > div > span { color: rgba(229, 230, 222, 0.28); font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; }
+.activity-card button { margin-top: 10px; }
 .spinning { animation: connector-spin 1s linear infinite; }
 @keyframes connector-spin { to { transform: rotate(360deg); } }
 

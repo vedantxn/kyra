@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionsSheet } from "./App";
-import type { GoogleConnectorStatus } from "./contracts";
+import type { AiEngineStatus, GoogleConnectorStatus } from "./contracts";
 
 afterEach(cleanup);
 
@@ -10,6 +10,19 @@ const actions = {
   onConnect: vi.fn(),
   onSync: vi.fn(),
   onDisconnect: vi.fn(),
+  onSaveAi: vi.fn(),
+  onActivateAi: vi.fn(),
+  onRunAi: vi.fn(),
+  onClearAi: vi.fn(),
+  onDiscoverOllama: vi.fn().mockResolvedValue([]),
+};
+
+const ai: AiEngineStatus = {
+  state: "disconnected",
+  queuedJobs: 0,
+  runningJobs: 0,
+  failedJobs: 0,
+  reviewCount: 0,
 };
 
 function status(state: GoogleConnectorStatus["state"]): GoogleConnectorStatus {
@@ -36,8 +49,10 @@ describe("Connections sheet", () => {
       <ConnectionsSheet
         {...actions}
         status={status(stateName)}
+        ai={ai}
         busy={false}
         error=""
+        aiError=""
       />,
     );
     expect(screen.getByText(label)).toBeInTheDocument();
@@ -48,13 +63,33 @@ describe("Connections sheet", () => {
       <ConnectionsSheet
         {...actions}
         status={status("reconnect_required")}
+        ai={ai}
         busy={false}
         error=""
+        aiError=""
       />,
     );
     expect(screen.getByText("12 messages")).toBeInTheDocument();
     expect(screen.getByText("4 events")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Disconnect/ })).toBeEnabled();
+  });
+
+  it("renders activated model state without exposing a saved key", () => {
+    render(
+      <ConnectionsSheet
+        {...actions}
+        status={status("connected")}
+        ai={{ ...ai, state: "ready", provider: "openai", requestedModel: "gpt-test", activatedModel: "gpt-test-2026", queuedJobs: 3, reviewCount: 2 }}
+        busy={false}
+        error=""
+        aiError=""
+      />,
+    );
+    expect(screen.getByText("gpt-test-2026")).toBeInTheDocument();
+    expect(screen.getByText("3 queued · 0 failed")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Leave blank to keep saved key")).toHaveValue("");
+    expect(screen.getByRole("button", { name: /Test & activate/ })).toBeEnabled();
   });
 });

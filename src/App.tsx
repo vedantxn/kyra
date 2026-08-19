@@ -1,20 +1,33 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, ChevronDown, Circle, Cloud, ListTodo, RefreshCw, Search, Sparkles, Unplug, X } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { Activity, AlertCircle, Bot, CalendarDays, Check, ChevronDown, Circle, Cloud, KeyRound, ListTodo, RefreshCw, RotateCcw, Search, Server, ShieldCheck, Sparkles, Unplug, X } from "lucide-react";
 import {
+  clearAiProvider,
   connectGoogle,
   createCalendarBlock,
   createTask,
   disconnectGoogle,
+  executeAiCommand,
+  getAiEngineStatus,
   getDashboard,
   getGoogleConnectorStatus,
   hideOverlay,
   isTauri,
+  listAiActivity,
+  listAiReviews,
+  listOllamaModels,
   mutateGoogleCalendar,
+  resolveAiReview,
+  retryAiJob,
+  revertAiAction,
+  runAiNow,
+  saveAiProviderConfig,
   setLoopStatus,
   syncGoogleNow,
+  testAiProvider,
 } from "./api";
 import { parseCommand } from "./command";
-import type { CalendarBlock, Dashboard, GoogleConnectorStatus, OpenLoop } from "./contracts";
+import type { AiActivity, AiCommandResult, AiEngineStatus, AiProvider, AiReview, CalendarBlock, Dashboard, GoogleConnectorStatus, OpenLoop, SaveAiProviderConfigInput } from "./contracts";
 
 const formatDay = (iso: string) => {
   const date = new Date(iso);
@@ -96,6 +109,13 @@ function Loops({ loops, onComplete }: { loops: OpenLoop[]; onComplete: (loop: Op
             <div>
               <h3>{loop.title}</h3>
               <p>{loop.summary}</p>
+              {(loop.ownership === "other" || loop.reviewState === "needs_review" || loop.scheduled) && (
+                <div className="loop-meta">
+                  {loop.ownership === "other" && <span>Waiting</span>}
+                  {loop.reviewState === "needs_review" && <span>Needs review</span>}
+                  {loop.scheduled && <span>Scheduled</span>}
+                </div>
+              )}
             </div>
           </article>
         ))}
@@ -108,12 +128,16 @@ function Loops({ loops, onComplete }: { loops: OpenLoop[]; onComplete: (loop: Op
 function CommandPalette({
   onTask,
   onCalendar,
+  onNatural,
 }: {
   onTask: (title: string) => Promise<void>;
   onCalendar: (title: string, startAt: string, endAt: string) => Promise<void>;
+  onNatural: (text: string, sessionId?: string) => Promise<AiCommandResult>;
 }) {
   const [value, setValue] = useState("");
   const [message, setMessage] = useState("");
+  const [sessionId, setSessionId] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -129,18 +153,37 @@ function CommandPalette({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!value.trim() || submitting) return;
     const parsed = parseCommand(value);
-    if (parsed.kind === "unknown") {
-      setMessage(parsed.message);
-      return;
-    }
+    setSubmitting(true);
     try {
-      if (parsed.kind === "task") await onTask(parsed.title);
-      if (parsed.kind === "calendar") await onCalendar(parsed.title, parsed.startAt, parsed.endAt);
-      setMessage(parsed.kind === "task" ? `Added: ${parsed.title}` : `Added to Google Calendar: ${parsed.title}`);
-      setValue("");
+      if (parsed.kind === "task") {
+        await onTask(parsed.title);
+        setSessionId(undefined);
+        setMessage(`Added: ${parsed.title}`);
+        setValue("");
+      } else if (parsed.kind === "calendar") {
+        await onCalendar(parsed.title, parsed.startAt, parsed.endAt);
+        setSessionId(undefined);
+        setMessage(`Added to Google Calendar: ${parsed.title}`);
+        setValue("");
+      } else {
+        const result = await onNatural(value, sessionId);
+        if (result.kind === "clarification_required") {
+          setSessionId(result.sessionId);
+          setMessage(result.question);
+          setValue("");
+          inputRef.current?.focus();
+        } else {
+          setSessionId(undefined);
+          setValue("");
+          setMessage(result.kind === "executed" ? "Done." : result.kind === "review_created" ? "Added to review." : result.reason);
+        }
+      }
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -153,7 +196,7 @@ function CommandPalette({
             ref={inputRef}
             value={value}
             onChange={(event) => { setValue(event.target.value); setMessage(""); }}
-            placeholder="What do you wanna get done?"
+            placeholder={sessionId ? "Answer Kyra’s question…" : "What do you wanna get done?"}
             aria-label="Kyra command"
           />
           <kbd>ESC</kbd>
@@ -250,6 +293,16 @@ const connectorLabels: Record<GoogleConnectorStatus["state"], string> = {
   error: "Retry scheduled",
 };
 
+const aiLabels: Record<AiEngineStatus["state"], string> = {
+  disconnected: "Not activated",
+  testing: "Testing model",
+  ready: "Ready",
+  running: "Running",
+  paused: "Paused",
+  blocked: "Blocked",
+  error: "Needs attention",
+};
+
 function formatSyncTime(value?: string | null) {
   if (!value) return "Never";
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -257,22 +310,63 @@ function formatSyncTime(value?: string | null) {
 
 export function ConnectionsSheet({
   status,
+  ai,
   busy,
   error,
+  aiError,
   onClose,
   onConnect,
   onSync,
   onDisconnect,
+  onSaveAi,
+  onActivateAi,
+  onRunAi,
+  onClearAi,
+  onDiscoverOllama,
 }: {
   status: GoogleConnectorStatus;
+  ai: AiEngineStatus;
   busy: boolean;
   error: string;
+  aiError: string;
   onClose: () => void;
   onConnect: () => void;
   onSync: () => void;
   onDisconnect: () => void;
+  onSaveAi: (input: SaveAiProviderConfigInput) => Promise<void>;
+  onActivateAi: () => Promise<void>;
+  onRunAi: () => Promise<void>;
+  onClearAi: (provider: AiProvider) => Promise<void>;
+  onDiscoverOllama: (baseUrl: string) => Promise<string[]>;
 }) {
   const connected = status.state !== "disconnected";
+  const [provider, setProvider] = useState<AiProvider>(ai.provider ?? "ollama");
+  const [model, setModel] = useState(ai.requestedModel ?? "");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:11434");
+  const [models, setModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (ai.provider) setProvider(ai.provider);
+    if (ai.requestedModel) setModel(ai.requestedModel);
+  }, [ai.provider, ai.requestedModel]);
+
+  const save = async () => {
+    await onSaveAi({
+      provider,
+      model,
+      apiKey: provider === "ollama" ? undefined : apiKey || undefined,
+      baseUrl: provider === "ollama" ? baseUrl : undefined,
+    });
+    setApiKey("");
+  };
+
+  const discover = async () => {
+    const discovered = await onDiscoverOllama(baseUrl);
+    setModels(discovered);
+    if (!model && discovered[0]) setModel(discovered[0]);
+  };
+
   return (
     <div className="connections-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="connections-sheet" aria-label="Connections">
@@ -304,6 +398,79 @@ export function ConnectionsSheet({
             </>
           )}
         </article>
+        <article className="connection-card ai-connection-card">
+          <div className="connection-provider"><Bot size={18} /><div><h3>Intelligence</h3><p>{ai.activatedModel ?? ai.requestedModel ?? "Choose one local or BYOK model"}</p></div><span className={`connection-state ${ai.state}`}>{aiLabels[ai.state]}</span></div>
+          <div className="ai-config-grid">
+            <label>Provider<select value={provider} onChange={(event) => { setProvider(event.target.value as AiProvider); setModel(""); }}><option value="ollama">Ollama</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
+            <label>Model<input value={model} list="ollama-models" onChange={(event) => setModel(event.target.value)} placeholder={provider === "ollama" ? "llama3.2" : provider === "openai" ? "gpt-5-mini" : "claude-sonnet-4-5"} /></label>
+            <datalist id="ollama-models">{models.map((item) => <option value={item} key={item} />)}</datalist>
+            {provider === "ollama" ? (
+              <label className="wide">Local URL<div className="input-action"><Server size={13} /><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /><button type="button" disabled={busy} onClick={() => void discover()}>Discover</button></div></label>
+            ) : (
+              <label className="wide">API key<div className="input-action"><KeyRound size={13} /><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={ai.provider === provider ? "Leave blank to keep saved key" : "Stored only in macOS Keychain"} /></div></label>
+            )}
+          </div>
+          {(aiError || ai.lastError) && <p className="connection-error">{aiError || ai.lastError}</p>}
+          {ai.provider && <dl className="ai-stats"><div><dt>Queue</dt><dd>{ai.queuedJobs} queued · {ai.failedJobs} failed</dd></div><div><dt>Reviews</dt><dd>{ai.reviewCount}</dd></div><div><dt>Last run</dt><dd>{formatSyncTime(ai.lastRunAt)}</dd></div></dl>}
+          <div className="connection-actions ai-actions">
+            <button disabled={busy || !model.trim()} onClick={() => void save()}>Save</button>
+            <button className="primary" disabled={busy || !ai.provider || ai.state === "testing"} onClick={() => void onActivateAi()}><ShieldCheck size={14} /> {ai.state === "testing" ? "Testing 12 cases…" : "Test & activate"}</button>
+            {ai.state === "ready" && <button disabled={busy} onClick={() => void onRunAi()}><RefreshCw size={14} /> Run</button>}
+          </div>
+          {ai.provider && <button className="clear-provider" disabled={busy} onClick={() => void onClearAi(ai.provider!)}>Remove provider and key</button>}
+          <small>Keys are write-only and stay in Keychain. Cloud requests use redacted identities and are not stored by Kyra.</small>
+        </article>
+      </section>
+    </div>
+  );
+}
+
+function ActivitySheet({
+  reviews,
+  activity,
+  busy,
+  error,
+  onClose,
+  onResolve,
+  onRevert,
+  onRetry,
+}: {
+  reviews: AiReview[];
+  activity: AiActivity[];
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onResolve: (id: string, decision: "accept" | "dismiss") => Promise<void>;
+  onRevert: (id: string) => Promise<void>;
+  onRetry: (id: string) => Promise<void>;
+}) {
+  return (
+    <div className="connections-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="connections-sheet activity-sheet" aria-label="AI activity and reviews">
+        <header><div><span>AI ENGINE</span><h2>Activity</h2></div><button onClick={onClose} aria-label="Close activity"><X size={17} /></button></header>
+        {error && <p className="connection-error">{error}</p>}
+        <div className="activity-scroll">
+          <h3 className="activity-section-title">Needs review <b>{reviews.length}</b></h3>
+          {reviews.length === 0 && <p className="activity-empty"><ShieldCheck size={15} /> No decisions waiting.</p>}
+          {reviews.map((review) => (
+            <article className="review-card" key={review.id}>
+              <div className="review-title"><AlertCircle size={15} /><div><h4>{review.title}</h4><p>{review.summary}</p></div></div>
+              {review.evidence.map((quote, index) => <blockquote key={`${review.id}-${index}`}>{quote}</blockquote>)}
+              {review.irreversibleEffects.map((effect) => <p className="irreversible" key={effect}>{effect}</p>)}
+              <div className="review-actions"><button disabled={busy} onClick={() => void onResolve(review.id, "dismiss")}>Dismiss</button><button className="primary" disabled={busy} onClick={() => void onResolve(review.id, "accept")}>Accept</button></div>
+            </article>
+          ))}
+          <h3 className="activity-section-title recent">Recent</h3>
+          {activity.length === 0 && <p className="activity-empty">No AI actions yet.</p>}
+          {activity.map((item) => (
+            <article className="activity-card" key={item.id}>
+              <div><span>{item.status.replaceAll("_", " ")}</span><h4>{item.title}</h4><p>{item.detail}</p></div>
+              {item.irreversibleEffects.map((effect) => <p className="irreversible" key={effect}>{effect}</p>)}
+              {item.kind === "job" && item.status !== "succeeded" && <button disabled={busy} onClick={() => void onRetry(item.id)}><RefreshCw size={13} /> Retry</button>}
+              {item.canRevert && <button disabled={busy} onClick={() => void onRevert(item.id)}><RotateCcw size={13} /> {item.compensation ? "Compensate" : "Undo"}</button>}
+            </article>
+          ))}
+        </div>
       </section>
     </div>
   );
@@ -313,15 +480,22 @@ export default function App() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [connector, setConnector] = useState<GoogleConnectorStatus>({ state: "disconnected", gmailMessageCount: 0, calendarEventCount: 0 });
+  const [aiEngine, setAiEngine] = useState<AiEngineStatus>({ state: "disconnected", queuedJobs: 0, runningJobs: 0, failedJobs: 0, reviewCount: 0 });
+  const [reviews, setReviews] = useState<AiReview[]>([]);
+  const [activityItems, setActivityItems] = useState<AiActivity[]>([]);
   const [connectorBusy, setConnectorBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const [connectorError, setConnectorError] = useState("");
+  const [aiError, setAiError] = useState("");
+  const [activityError, setActivityError] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     const load = () => {
-      void Promise.all([getDashboard(), getGoogleConnectorStatus()])
-        .then(([nextDashboard, nextConnector]) => { setDashboard(nextDashboard); setConnector(nextConnector); })
+      void Promise.all([getDashboard(), getGoogleConnectorStatus(), getAiEngineStatus()])
+        .then(([nextDashboard, nextConnector, nextAi]) => { setDashboard(nextDashboard); setConnector(nextConnector); setAiEngine(nextAi); })
         .catch((cause) => setError(String(cause)));
     };
     load();
@@ -330,15 +504,40 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    const refresh = () => {
+      if (disposed) return;
+      void Promise.all([getDashboard(), getAiEngineStatus(), listAiReviews(), listAiActivity()])
+        .then(([nextDashboard, nextAi, nextReviews, nextActivity]) => {
+          if (disposed) return;
+          setDashboard(nextDashboard);
+          setAiEngine(nextAi);
+          setReviews(nextReviews);
+          setActivityItems(nextActivity);
+        })
+        .catch((cause) => setActivityError(cause instanceof Error ? cause.message : String(cause)));
+    };
+    void Promise.all(["ai-engine-state-changed", "dashboard-invalidated", "ai-review-changed", "ai-action-completed"].map(async (event) => {
+      const unlisten = await listen(event, refresh);
+      if (disposed) unlisten();
+      else unlisteners.push(unlisten);
+    }));
+    return () => { disposed = true; unlisteners.forEach((unlisten) => unlisten()); };
+  }, []);
+
+  useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (connectionsOpen) setConnectionsOpen(false);
+      if (activityOpen) setActivityOpen(false);
+      else if (connectionsOpen) setConnectionsOpen(false);
       else if (plannerOpen) setPlannerOpen(false);
       else void hideOverlay();
     };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
-  }, [connectionsOpen, plannerOpen]);
+  }, [activityOpen, connectionsOpen, plannerOpen]);
 
   const visibleLoops = useMemo(
     () => dashboard?.openLoops.filter((loop) => loop.status !== "done" && loop.status !== "dismissed") ?? [],
@@ -373,9 +572,17 @@ export default function App() {
   };
 
   const refreshNativeState = async () => {
-    const [nextDashboard, nextConnector] = await Promise.all([getDashboard(), getGoogleConnectorStatus()]);
+    const [nextDashboard, nextConnector, nextAi] = await Promise.all([getDashboard(), getGoogleConnectorStatus(), getAiEngineStatus()]);
     setDashboard(nextDashboard);
     setConnector(nextConnector);
+    setAiEngine(nextAi);
+  };
+
+  const refreshAiActivity = async () => {
+    const [nextAi, nextReviews, nextActivity] = await Promise.all([getAiEngineStatus(), listAiReviews(), listAiActivity()]);
+    setAiEngine(nextAi);
+    setReviews(nextReviews);
+    setActivityItems(nextActivity);
   };
 
   const connect = async () => {
@@ -422,6 +629,119 @@ export default function App() {
     }
   };
 
+  const saveAi = async (input: SaveAiProviderConfigInput) => {
+    setAiBusy(true);
+    setAiError("");
+    try {
+      setAiEngine(await saveAiProviderConfig(input));
+    } catch (cause) {
+      setAiError(cause instanceof Error ? cause.message : String(cause));
+      throw cause;
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const activateAi = async () => {
+    setAiBusy(true);
+    setAiError("");
+    setAiEngine((current) => ({ ...current, state: "testing" }));
+    try {
+      const report = await testAiProvider();
+      if (!report.passed) throw new Error("This model did not pass Kyra’s 12-case safety activation.");
+      await refreshAiActivity();
+    } catch (cause) {
+      setAiError(cause instanceof Error ? cause.message : String(cause));
+      setAiEngine(await getAiEngineStatus());
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const runAi = async () => {
+    setAiBusy(true);
+    setAiError("");
+    try {
+      setAiEngine(await runAiNow());
+      await Promise.all([refreshNativeState(), refreshAiActivity()]);
+    } catch (cause) {
+      setAiError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const clearAi = async (provider: AiProvider) => {
+    setAiBusy(true);
+    setAiError("");
+    try {
+      setAiEngine(await clearAiProvider(provider));
+    } catch (cause) {
+      setAiError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const discoverOllama = async (baseUrl: string) => {
+    setAiBusy(true);
+    setAiError("");
+    try {
+      return (await listOllamaModels(baseUrl)).map((item) => item.name);
+    } catch (cause) {
+      setAiError(cause instanceof Error ? cause.message : String(cause));
+      return [];
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const naturalCommand = async (text: string, sessionId?: string) => {
+    const result = await executeAiCommand(text, sessionId);
+    await Promise.all([refreshNativeState(), refreshAiActivity()]);
+    return result;
+  };
+
+  const resolveReview = async (id: string, decision: "accept" | "dismiss") => {
+    setAiBusy(true);
+    setActivityError("");
+    try {
+      await resolveAiReview(id, decision);
+      await Promise.all([refreshNativeState(), refreshAiActivity()]);
+    } catch (cause) {
+      setActivityError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const revertAction = async (id: string) => {
+    setAiBusy(true);
+    setActivityError("");
+    try {
+      const result = await revertAiAction(id);
+      setActivityError(result.message);
+      await Promise.all([refreshNativeState(), refreshAiActivity()]);
+    } catch (cause) {
+      setActivityError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const retryJob = async (id: string) => {
+    setAiBusy(true);
+    setActivityError("");
+    try {
+      setAiEngine(await retryAiJob(id));
+      await runAi();
+    } catch (cause) {
+      setActivityError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   const complete = async (loop: OpenLoop) => {
     try {
       const updated = await setLoopStatus(loop.id, "done", loop.version);
@@ -435,6 +755,9 @@ export default function App() {
   if (error) return <main className="fatal"><Sparkles /><h1>Kyra could not start</h1><p>{error}</p></main>;
   if (!dashboard) return <main className="loading"><Logo /><span>Connecting the day…</span></main>;
 
+  const systemState = aiEngine.reviewCount > 0 ? "review" : aiEngine.state === "ready" ? connector.state : aiEngine.state;
+  const systemTitle = aiEngine.reviewCount > 0 ? `${aiEngine.reviewCount} AI review${aiEngine.reviewCount === 1 ? "" : "s"} waiting` : `Google: ${connectorLabels[connector.state]} · AI: ${aiLabels[aiEngine.state]}`;
+
   return (
     <main className="app-shell">
       <Timeline blocks={dashboard.calendarBlocks} now={dashboard.now} onExpand={() => setPlannerOpen(true)} />
@@ -443,13 +766,15 @@ export default function App() {
           <div className="night-title"><Logo /><span>Night</span></div>
           <p>{dashboard.briefing}</p>
         </div>
-        <CommandPalette onTask={addTask} onCalendar={addCalendar} />
+        <CommandPalette onTask={addTask} onCalendar={addCalendar} onNatural={naturalCommand} />
       </section>
       <Loops loops={dashboard.openLoops} onComplete={complete} />
       <span className="loop-count">{37 + Math.max(0, visibleLoops.length - 5)}</span>
-      <button className={`status-dot ${connector.state}`} title={`Google: ${connectorLabels[connector.state]}`} aria-label="Open connections" onClick={() => setConnectionsOpen(true)} />
+      <button className={`status-dot ${systemState}`} title={systemTitle} aria-label="Open connections" onClick={() => setConnectionsOpen(true)} />
+      <button className="activity-trigger" aria-label="Open AI activity" onClick={() => { setActivityOpen(true); void refreshAiActivity(); }}><Activity size={14} />{aiEngine.reviewCount > 0 && <span>{aiEngine.reviewCount}</span>}</button>
       {plannerOpen && <Planner blocks={dashboard.calendarBlocks} showDemo={connector.state === "disconnected"} onClose={() => setPlannerOpen(false)} />}
-      {connectionsOpen && <ConnectionsSheet status={connector} busy={connectorBusy} error={connectorError} onClose={() => setConnectionsOpen(false)} onConnect={() => void connect()} onSync={() => void syncConnector()} onDisconnect={() => void disconnect()} />}
+      {connectionsOpen && <ConnectionsSheet status={connector} ai={aiEngine} busy={connectorBusy || aiBusy} error={connectorError} aiError={aiError} onClose={() => setConnectionsOpen(false)} onConnect={() => void connect()} onSync={() => void syncConnector()} onDisconnect={() => void disconnect()} onSaveAi={saveAi} onActivateAi={activateAi} onRunAi={runAi} onClearAi={clearAi} onDiscoverOllama={discoverOllama} />}
+      {activityOpen && <ActivitySheet reviews={reviews} activity={activityItems} busy={aiBusy} error={activityError} onClose={() => setActivityOpen(false)} onResolve={resolveReview} onRevert={revertAction} onRetry={retryJob} />}
     </main>
   );
 }

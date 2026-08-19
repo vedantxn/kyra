@@ -1544,6 +1544,7 @@ mod tests {
             calendar: None,
             person_ids: Vec::new(),
             fact_ids: Vec::new(),
+            briefing_segments: Vec::new(),
             evidence: vec![
                 super::super::types::EvidenceReference {
                     source_revision_id: "r1".to_owned(),

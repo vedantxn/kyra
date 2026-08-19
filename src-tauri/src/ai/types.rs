@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub const INTENT_SCHEMA_VERSION: &str = "kyra.intent.v1";
 pub const PROMPT_VERSION: &str = "kyra.prompt.v1";
@@ -144,6 +145,44 @@ pub enum IntentAction {
     NoAction,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BriefingNarrativeRole {
+    OnMe,
+    Waiting,
+    Shared,
+    Scheduled,
+    NeedsReview,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BriefingUrgency {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BriefingActionReference {
+    ProtectTime,
+    FollowUp,
+    Coordinate,
+    Attend,
+    Review,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BriefingSegment {
+    pub fact_id: String,
+    pub subject_loop_id: String,
+    pub narrative_role: BriefingNarrativeRole,
+    pub urgency: BriefingUrgency,
+    pub action_reference: BriefingActionReference,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CalendarProposal {
@@ -180,9 +219,46 @@ pub struct IntentProposal {
     #[serde(default)]
     pub fact_ids: Vec<String>,
     #[serde(default)]
+    pub briefing_segments: Vec<BriefingSegment>,
+    #[serde(default)]
     pub evidence: Vec<EvidenceReference>,
     pub confidence: f32,
     pub ambiguity: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BriefingFactVersion {
+    pub loop_id: String,
+    pub version: i64,
+    pub ownership: String,
+    pub priority: i64,
+    pub due_at: Option<String>,
+    pub review_state: String,
+    pub scheduled: bool,
+}
+
+pub fn briefing_fact_version_hash(mut facts: Vec<BriefingFactVersion>) -> String {
+    facts.sort_by(|left, right| left.loop_id.cmp(&right.loop_id));
+    let encoded = serde_json::to_vec(&facts).expect("briefing routing facts are serializable");
+    hex::encode(Sha256::digest(encoded))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BriefingSnapshot {
+    pub fact_version_hash: String,
+    pub text: String,
+    pub generated_by: String,
+    pub ordered_fact_ids: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedAppValue {
+    pub nonce: String,
+    pub ciphertext: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

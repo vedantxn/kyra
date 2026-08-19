@@ -1,8 +1,8 @@
 # Kyra Reconstruction: Technical Architecture V1
 
-**Status:** Proposed implementation architecture
+**Status:** Original design record; connector and AI implementation details are superseded by [AI Engine V1](./AI_ENGINE_V1.md) and the current README
 
-**Date:** 15 August 2026
+**Date:** 15 August 2026, annotated 18 August 2026
 
 **Target:** A software-first macOS proof that demonstrates the complete open-loop product cycle
 

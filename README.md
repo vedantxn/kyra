@@ -16,10 +16,17 @@ This repository is an independent, software-first V1 exploration based on public
 - Provider payload encryption before SQLite; refresh tokens and per-account data keys live in macOS Keychain.
 - Startup, manual, and five-minute single-flight synchronization with bounded retry backoff.
 - `/cal <title> <time>` creates a real one-hour Google Calendar event when connected, for example `/cal standup 9am`.
+- A Rust-owned AI engine with one active provider at a time: local Ollama, BYOK OpenAI Responses, or BYOK Anthropic Messages.
+- Strict structured intents, immutable source revisions, exact evidence offsets, pseudonymized cloud prompts, and deterministic Rust policy checks before any mutation.
+- Persistent fenced jobs with generation barriers, leases, heartbeats, bounded retries, dead-letter recovery, and startup catch-up.
+- Evidence-backed passive open-loop maintenance plus silent Calendar creation only for unambiguous, two-sided confirmed meetings.
+- Natural-language Command+K task and Calendar actions with one-shot clarification, attendee-notification confirmation, audit history, task Undo, and Calendar compensation.
+- A constrained Night briefing where models may only order versioned fact IDs; Rust validates every role/reference and renders trusted templates with a deterministic fallback.
+- A 12-case model activation gate and checked-in provider-neutral evaluation corpus with more than 80 cases.
 - Optimistic concurrency when completing an open loop.
 - A browser preview that uses fixture data without exposing SQLite or privileged APIs to the webview.
 
-Gmail is indexed for the later AI-engine milestone but does not create tasks yet. Message-shaped browser-preview evidence remains explicit fixture data; the V1 never claims live WhatsApp access.
+Message-shaped browser-preview evidence remains explicit fixture data; the V1 never claims live WhatsApp access. Live model activation still requires the user to supply a provider key or a running local Ollama instance.
 
 ## Google test-user setup
 
@@ -33,6 +40,16 @@ KYRA_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 ```
 
 No client secret is used. `.env.local` is ignored by Git. Rebuild the native app after changing the client ID so a Finder-launched bundle can read the public desktop client identifier.
+
+## AI provider setup
+
+Open Kyra's **Connections** sheet from the status dot, then choose exactly one provider:
+
+- **Ollama:** run Ollama locally, keep the URL on `localhost` or `127.0.0.1`, discover a model, and activate it.
+- **OpenAI:** enter a model and API key. Kyra uses the Responses API with strict JSON schema output and `store: false`.
+- **Anthropic:** enter a model and API key. Kyra uses Messages with structured output.
+
+API keys are write-only in the interface and live in macOS Keychain. Saving or changing a provider/model fences previously queued work. **Test & activate** must pass the local 12-case authorization suite before inference jobs run; cloud aliases require reactivation after seven days.
 
 ## Run it
 
@@ -60,8 +77,10 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+`cargo test` includes the deterministic fake-provider activation suite and validates the versioned 80+ case provider-neutral corpus. Live-provider checks are intentionally opt-in because they require user credentials, network access, or local Ollama hardware.
+
 ## Architecture
 
 The React webview is an unprivileged renderer. It cannot access SQLite, the filesystem, connector credentials, or future model credentials directly. Typed Tauri commands cross into the Rust core, and a window-scoped capability grants only the application commands used by this slice. Google refresh tokens and encryption keys never cross that boundary.
 
-See [`research/TECHNICAL_ARCHITECTURE_V1.md`](research/TECHNICAL_ARCHITECTURE_V1.md) for the full V1 architecture and trust boundaries.
+See [`research/AI_ENGINE_V1.md`](research/AI_ENGINE_V1.md) for the implemented AI engine and [`research/TECHNICAL_ARCHITECTURE_V1.md`](research/TECHNICAL_ARCHITECTURE_V1.md) for the original system design record.

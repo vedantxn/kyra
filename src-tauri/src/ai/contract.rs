@@ -28,6 +28,7 @@ pub struct ValidationContext<'a> {
     pub known_loop_ids: &'a HashSet<String>,
     pub known_event_ids: &'a HashSet<String>,
     pub known_person_ids: &'a HashSet<String>,
+    pub known_fact_ids: &'a HashSet<String>,
 }
 
 pub fn validate_envelope(
@@ -58,6 +59,40 @@ pub fn validate_envelope(
             .any(|id| !context.known_person_ids.contains(id))
         {
             return Err(ContractError::UnknownReference);
+        }
+        if proposal
+            .fact_ids
+            .iter()
+            .any(|id| !context.known_fact_ids.contains(id))
+        {
+            return Err(ContractError::UnknownReference);
+        }
+        if proposal.briefing_segments.iter().any(|segment| {
+            !context.known_fact_ids.contains(&segment.fact_id)
+                || !context.known_loop_ids.contains(&segment.subject_loop_id)
+        }) {
+            return Err(ContractError::UnknownReference);
+        }
+        if matches!(proposal.action, IntentAction::BriefingOrder) {
+            let segment_facts: Vec<&str> = proposal
+                .briefing_segments
+                .iter()
+                .map(|segment| segment.fact_id.as_str())
+                .collect();
+            let unique: HashSet<&str> = segment_facts.iter().copied().collect();
+            if proposal
+                .fact_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                != segment_facts
+                || unique.len() != segment_facts.len()
+                || proposal.briefing_segments.is_empty()
+            {
+                return Err(ContractError::InvalidAction);
+            }
+        } else if !proposal.briefing_segments.is_empty() {
+            return Err(ContractError::InvalidAction);
         }
         if let Some(calendar) = proposal.calendar.as_ref() {
             if calendar
@@ -195,6 +230,18 @@ pub fn intent_json_schema() -> Value {
         },
         "required": ["eventId", "title", "description", "location", "startAt", "endAt", "allDayStart", "allDayEnd", "timeZone", "attendeePersonIds", "recurrence", "expectedEtag", "sendUpdates"]
     });
+    let briefing_segment = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "factId": {"type": "string"},
+            "subjectLoopId": {"type": "string"},
+            "narrativeRole": {"type": "string", "enum": ["on_me", "waiting", "shared", "scheduled", "needs_review"]},
+            "urgency": {"type": "string", "enum": ["low", "medium", "high"]},
+            "actionReference": {"type": "string", "enum": ["protect_time", "follow_up", "coordinate", "attend", "review"]}
+        },
+        "required": ["factId", "subjectLoopId", "narrativeRole", "urgency", "actionReference"]
+    });
     json!({
         "type": "object",
         "additionalProperties": false,
@@ -218,11 +265,12 @@ pub fn intent_json_schema() -> Value {
                         "calendar": calendar,
                         "personIds": string_array(),
                         "factIds": string_array(),
+                        "briefingSegments": {"type": "array", "items": briefing_segment},
                         "evidence": {"type": "array", "items": evidence},
                         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                         "ambiguity": nullable_string()
                     },
-                    "required": ["proposalId", "action", "targetLoopId", "title", "summary", "ownership", "dueAt", "calendar", "personIds", "factIds", "evidence", "confidence", "ambiguity"]
+                    "required": ["proposalId", "action", "targetLoopId", "title", "summary", "ownership", "dueAt", "calendar", "personIds", "factIds", "briefingSegments", "evidence", "confidence", "ambiguity"]
                 }
             }
         },
@@ -278,6 +326,7 @@ mod tests {
                 calendar: None,
                 person_ids: vec!["p1".to_owned()],
                 fact_ids: Vec::new(),
+                briefing_segments: Vec::new(),
                 evidence: vec![EvidenceReference {
                     source_revision_id: "r1".to_owned(),
                     document_hash: document.document_hash.clone(),
@@ -295,6 +344,7 @@ mod tests {
             known_loop_ids: &HashSet::new(),
             known_event_ids: &HashSet::new(),
             known_person_ids: &people,
+            known_fact_ids: &HashSet::new(),
         };
         assert_eq!(validate_envelope(&envelope, &context), Ok(()));
         envelope.proposals[0].evidence[0].quote_hash = "tampered".to_owned();

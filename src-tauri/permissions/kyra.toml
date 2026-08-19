@@ -11,5 +11,17 @@ commands.allow = [
   "connect_google",
   "disconnect_google",
   "sync_google_now",
-  "mutate_google_calendar"
+  "mutate_google_calendar",
+  "get_ai_engine_status",
+  "save_ai_provider_config",
+  "clear_ai_provider",
+  "list_ollama_models",
+  "test_ai_provider",
+  "run_ai_now",
+  "execute_ai_command",
+  "list_ai_reviews",
+  "resolve_ai_review",
+  "list_ai_activity",
+  "retry_ai_job",
+  "revert_ai_action"
 ]

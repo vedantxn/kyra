@@ -96,6 +96,7 @@ pub async fn run_activation_suite(
                 known_loop_ids: &known_loops,
                 known_event_ids: &known_events,
                 known_person_ids: &known_people,
+                known_fact_ids: &HashSet::new(),
             },
         );
         if validation.is_ok() {
@@ -282,6 +283,7 @@ impl ModelProvider for DeterministicFakeProvider {
                 vec!["p1".to_owned()]
             },
             fact_ids: Vec::new(),
+            briefing_segments: Vec::new(),
             evidence,
             confidence: 1.0,
             ambiguity: None,
