@@ -140,6 +140,20 @@ describe("First-run setup", () => {
     expect(screen.getByRole("button", { name: "Close setup" })).toBeDisabled();
   });
 
+  it("distinguishes first synchronization from browser authorization", () => {
+    render(<SetupFlow {...setupActions} status={status("syncing")} busy error="" />);
+    expect(screen.getByRole("heading", { name: "Bringing your day into focus." })).toBeInTheDocument();
+    expect(screen.getByText("IMPORTING YOUR WORKSPACE")).toBeInTheDocument();
+    expect(screen.getByText("test@example.com")).toBeInTheDocument();
+  });
+
+  it("recovers revoked Google access without losing setup context", () => {
+    render(<SetupFlow {...setupActions} status={{ ...status("reconnect_required"), lastError: undefined }} busy={false} error="" />);
+    expect(screen.getByRole("heading", { name: "Google did not connect." })).toBeInTheDocument();
+    expect(screen.getByText(/Google access has expired/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Try again/ })).toBeEnabled();
+  });
+
   it("shows synchronized counts before finishing", () => {
     render(<SetupFlow {...setupActions} status={status("connected")} busy={false} error="" />);
     expect(screen.getByRole("heading", { name: "Your real day is ready." })).toBeInTheDocument();

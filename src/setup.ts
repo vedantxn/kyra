@@ -25,5 +25,5 @@ export function writeSetupPreference(
 }
 
 export function shouldShowSetup(status: GoogleConnectorStatus, preference: SetupPreference | null) {
-  return status.state === "disconnected" && preference === null;
+  return status.state !== "connected" && preference === null;
 }

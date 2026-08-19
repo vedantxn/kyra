@@ -326,10 +326,11 @@ export function SetupFlow({
   onExplore: () => void;
   onClose: () => void;
 }) {
-  const [started, setStarted] = useState(status.state === "connecting" || status.state === "syncing");
+  const [started, setStarted] = useState(status.state !== "disconnected" && status.state !== "connected");
   const ready = status.state === "connected" && Boolean(status.lastSyncAt);
   const working = busy || status.state === "connecting" || status.state === "syncing";
-  const failed = started && !working && !ready && Boolean(error || status.lastError);
+  const failed = started && !working && !ready && (Boolean(error || status.lastError) || status.state === "reconnect_required" || status.state === "error");
+  const failureMessage = error || status.lastError || (status.state === "reconnect_required" ? "Google access has expired. Reconnect to continue synchronizing Gmail and Calendar." : "Kyra could not reach Google. Your local data is still safe.");
 
   const begin = async () => {
     setStarted(true);
@@ -359,7 +360,7 @@ export function SetupFlow({
             <span className="setup-loader"><LoaderCircle size={28} /></span>
             <p className="setup-kicker">{status.state === "syncing" ? "IMPORTING YOUR WORKSPACE" : "WAITING FOR GOOGLE"}</p>
             <h1>{status.state === "syncing" ? "Bringing your day into focus." : "Finish connecting in your browser."}</h1>
-            <p className="setup-lede">{status.state === "syncing" ? "Kyra is securely importing Gmail and your primary Calendar. Keep this window open for the first sync." : "Google opened in your system browser. Choose your test account and approve the requested access, then return here."}</p>
+            <p className="setup-lede">{status.state === "syncing" ? "Kyra is securely importing Gmail and your primary Calendar. Keep this window open for the first sync." : "Google opened in your system browser. Choose your Google account and approve the requested access, then return here."}</p>
             <div className="setup-progress">
               <div className={status.accountEmail ? "complete" : "active"}>{status.accountEmail ? <Check size={15} /> : <LoaderCircle size={15} />}<span><strong>Google account</strong><small>{status.accountEmail ?? "Authorization in progress"}</small></span></div>
               <div className={status.state === "syncing" ? "active" : "pending"}>{status.state === "syncing" ? <LoaderCircle size={15} /> : <Circle size={15} />}<span><strong>Gmail</strong><small>Inbox + Sent, last 30 days, up to 500 messages</small></span></div>
@@ -372,7 +373,7 @@ export function SetupFlow({
             <span className="setup-error-icon"><AlertCircle size={24} /></span>
             <p className="setup-kicker">CONNECTION NEEDS ATTENTION</p>
             <h1>Google did not connect.</h1>
-            <p className="setup-lede">{error || status.lastError}</p>
+            <p className="setup-lede">{failureMessage}</p>
             <button className="setup-primary" onClick={() => void begin()}>Try again <RefreshCw size={14} /></button>
             <button className="setup-secondary" onClick={onExplore}>Use the sample day for now</button>
             <p className="setup-footnote">Your local tasks are untouched. You can return to this guide from Settings.</p>
@@ -437,7 +438,7 @@ export function ConnectionsSheet({
   onDiscoverOllama: (baseUrl: string) => Promise<string[]>;
   onOpenSetup: () => void;
 }) {
-  const connected = status.state !== "disconnected";
+  const connected = status.state !== "disconnected" && !(status.state === "connecting" && !status.accountEmail);
   const [provider, setProvider] = useState<AiProvider>(ai.provider ?? "ollama");
   const [model, setModel] = useState(ai.requestedModel ?? "");
   const [apiKey, setApiKey] = useState("");

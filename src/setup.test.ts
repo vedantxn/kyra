@@ -13,6 +13,7 @@ describe("setup preference", () => {
     expect(shouldShowSetup(disconnected, null)).toBe(true);
     expect(shouldShowSetup(disconnected, "skipped")).toBe(false);
     expect(shouldShowSetup({ ...disconnected, state: "connected" }, null)).toBe(false);
+    expect(shouldShowSetup({ ...disconnected, state: "reconnect_required" }, null)).toBe(true);
   });
 
   it("persists only recognized setup choices", () => {
