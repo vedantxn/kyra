@@ -429,9 +429,9 @@ kbd {
 .setup-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; color: rgba(247, 248, 242, 0.88); font: 400 28px/1 "Iowan Old Style", Baskerville, Georgia, serif; }
 .setup-brand .logo { width: 24px; height: 24px; }
 .setup-brand .logo::before { inset: 5px; }
-.setup-kicker { margin: 0 0 11px; color: rgba(225, 226, 217, 0.46); font-size: 8.5px; font-weight: 750; letter-spacing: 0.2em; }
+.setup-kicker { margin: 0 0 11px; color: rgba(225, 226, 217, 0.58); font-size: 9.5px; font-weight: 750; letter-spacing: 0.2em; }
 .setup-dialog h1 { margin: 0; color: rgba(249, 249, 242, 0.94); font: 400 35px/1.12 "Iowan Old Style", Baskerville, Georgia, serif; letter-spacing: -0.025em; text-wrap: balance; }
-.setup-lede { margin: 17px 0 0; color: rgba(232, 233, 225, 0.6); font-size: 12.5px; line-height: 1.62; }
+.setup-lede { margin: 17px 0 0; color: rgba(232, 233, 225, 0.68); font-size: 13.5px; line-height: 1.62; }
 .setup-lede strong { color: rgba(246, 247, 239, 0.82); font-weight: 620; }
 
 .setup-access { padding-left: 28px; border-left: 1px solid rgba(235, 236, 228, 0.08); }
@@ -440,8 +440,8 @@ kbd {
 .setup-access > div > span { display: grid; width: 29px; height: 29px; border: 1px solid rgba(235, 236, 228, 0.09); border-radius: 9px; color: rgba(229, 231, 221, 0.48); place-items: center; }
 .setup-access p { margin: 0; }
 .setup-access strong, .setup-access small { display: block; }
-.setup-access strong { color: rgba(246, 247, 240, 0.86); font-size: 11.5px; font-weight: 650; }
-.setup-access small { margin-top: 4px; color: rgba(228, 229, 221, 0.5); font-size: 10px; line-height: 1.48; }
+.setup-access strong { color: rgba(246, 247, 240, 0.86); font-size: 12px; font-weight: 650; }
+.setup-access small { margin-top: 4px; color: rgba(228, 229, 221, 0.6); font-size: 11.5px; line-height: 1.5; }
 
 .setup-actions { display: flex; align-items: center; gap: 10px; margin-top: 40px; }
 .setup-primary, .setup-secondary {
@@ -449,10 +449,10 @@ kbd {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 39px;
+  height: 41px;
   padding: 0 16px;
   border-radius: 10px;
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 680;
   cursor: pointer;
 }
@@ -460,7 +460,7 @@ kbd {
 .setup-primary:hover { background: rgba(242, 242, 235, 0.18); }
 .setup-secondary { border: 1px solid transparent; background: transparent; color: rgba(231, 232, 224, 0.5); }
 .setup-secondary:hover { color: rgba(244, 245, 237, 0.7); background: rgba(237, 238, 230, 0.035); }
-.setup-footnote { margin: 13px 0 0; color: rgba(225, 226, 218, 0.36); font-size: 9.25px; line-height: 1.5; }
+.setup-footnote { margin: 13px 0 0; color: rgba(225, 226, 218, 0.48); font-size: 10.5px; line-height: 1.5; }
 
 .setup-working, .setup-ready, .setup-error-state { max-width: 525px; margin: 0 auto; padding: 12px 0 2px; text-align: center; }
 .setup-loader, .setup-success, .setup-error-icon { display: grid; width: 48px; height: 48px; margin: 0 auto 24px; border: 1px solid rgba(235, 236, 228, 0.1); border-radius: 15px; color: rgba(222, 224, 214, 0.58); background: rgba(238, 239, 231, 0.03); place-items: center; }
@@ -479,16 +479,16 @@ kbd {
 .setup-progress > div.active > svg { animation: connector-spin 1s linear infinite; }
 .setup-progress > div.complete { color: rgba(159, 184, 148, 0.88); }
 .setup-progress span, .setup-progress strong, .setup-progress small { display: block; }
-.setup-progress strong { color: rgba(245, 246, 238, 0.8); font-size: 11px; }
-.setup-progress small { margin-top: 3px; color: rgba(226, 227, 219, 0.42); font-size: 9.5px; }
+.setup-progress strong { color: rgba(245, 246, 238, 0.8); font-size: 12px; }
+.setup-progress small { margin-top: 3px; color: rgba(226, 227, 219, 0.54); font-size: 10.5px; }
 
 .setup-counts { display: grid; grid-template-columns: 1fr 1fr; width: min(390px, 100%); margin: 30px auto 0; overflow: hidden; border: 1px solid rgba(234, 235, 227, 0.09); border-radius: 14px; }
 .setup-counts > div { padding: 17px 20px; text-align: left; }
 .setup-counts > div + div { border-left: 1px solid rgba(234, 235, 227, 0.08); }
-.setup-counts dt { margin-bottom: 7px; color: rgba(228, 229, 221, 0.43); font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.setup-counts dt { margin-bottom: 7px; color: rgba(228, 229, 221, 0.52); font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 .setup-counts dd { margin: 0; color: rgba(247, 248, 241, 0.88); font: 400 25px/1 "Iowan Old Style", Baskerville, Georgia, serif; }
-.setup-counts dd span { display: block; margin-top: 6px; color: rgba(228, 229, 221, 0.46); font: 500 9.25px/1.2 "Avenir Next", "Helvetica Neue", sans-serif; }
-.setup-last-sync { margin: 12px 0 0; color: rgba(228, 229, 221, 0.4); font-size: 9.25px; }
+.setup-counts dd span { display: block; margin-top: 6px; color: rgba(228, 229, 221, 0.54); font: 500 10.5px/1.2 "Avenir Next", "Helvetica Neue", sans-serif; }
+.setup-last-sync { margin: 12px 0 0; color: rgba(228, 229, 221, 0.5); font-size: 10.5px; }
 
 .connections-backdrop {
   position: fixed;
@@ -514,7 +514,7 @@ kbd {
 }
 
 .connections-sheet header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
-.connections-sheet header span { color: rgba(231, 232, 224, 0.32); font-size: 9px; font-weight: 700; letter-spacing: 0.2em; }
+.connections-sheet header span { color: rgba(231, 232, 224, 0.44); font-size: 9.5px; font-weight: 700; letter-spacing: 0.2em; }
 .connections-sheet h2 { margin: 4px 0 0; color: rgba(248, 248, 241, 0.92); font: 400 30px/1.1 "Iowan Old Style", Baskerville, Georgia, serif; }
 .connections-sheet header button { display: grid; width: 30px; height: 30px; padding: 0; border: 1px solid rgba(232, 233, 224, 0.1); border-radius: 9px; background: transparent; color: rgba(234, 235, 227, 0.48); cursor: pointer; place-items: center; }
 .connections-sheet header button:hover { background: rgba(235, 236, 228, 0.06); color: rgba(247, 248, 241, 0.82); }
@@ -524,8 +524,8 @@ kbd {
 .connection-provider { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; }
 .connection-provider > svg { color: rgba(238, 239, 231, 0.56); }
 .connection-provider h3 { margin: 0; color: rgba(247, 248, 241, 0.9); font-size: 14px; font-weight: 650; }
-.connection-provider p { margin: 3px 0 0; overflow: hidden; color: rgba(231, 232, 224, 0.49); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
-.connection-state { padding: 4px 7px; border-radius: 99px; background: rgba(231, 232, 224, 0.07); color: rgba(232, 233, 225, 0.54); font-size: 9.5px; }
+.connection-provider p { margin: 3px 0 0; overflow: hidden; color: rgba(231, 232, 224, 0.58); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
+.connection-state { padding: 4px 7px; border-radius: 99px; background: rgba(231, 232, 224, 0.07); color: rgba(232, 233, 225, 0.62); font-size: 10px; }
 .connection-state.connected { background: rgba(140, 164, 129, 0.14); color: rgba(183, 204, 173, 0.86); }
 .connection-state.error, .connection-state.reconnect_required { background: rgba(201, 131, 114, 0.12); color: rgba(224, 161, 146, 0.86); }
 .connection-state.syncing, .connection-state.connecting { color: rgba(218, 201, 146, 0.9); }
@@ -533,19 +533,19 @@ kbd {
 .connection-state.testing, .connection-state.running { color: rgba(218, 201, 146, 0.9); }
 .connection-state.paused, .connection-state.blocked, .connection-state.error { background: rgba(201, 131, 114, 0.12); color: rgba(224, 161, 146, 0.86); }
 
-.connection-copy { margin: 20px 0 16px; color: rgba(230, 231, 223, 0.5); font-size: 12px; line-height: 1.55; }
+.connection-copy { margin: 20px 0 16px; color: rgba(230, 231, 223, 0.6); font-size: 12.5px; line-height: 1.55; }
 .connection-card dl { margin: 20px 0 4px; }
 .connection-card dl div { display: flex; justify-content: space-between; padding: 9px 0; border-top: 1px solid rgba(234, 235, 227, 0.07); }
-.connection-card dt, .connection-card dd { margin: 0; font-size: 11px; }
-.connection-card dt { color: rgba(229, 230, 222, 0.4); }
+.connection-card dt, .connection-card dd { margin: 0; font-size: 11.5px; }
+.connection-card dt { color: rgba(229, 230, 222, 0.5); }
 .connection-card dd { color: rgba(243, 244, 236, 0.76); }
-.connection-error { margin: 12px 0; color: rgba(226, 158, 142, 0.9); font-size: 11px; line-height: 1.45; }
-.connect-button, .connection-actions button { border: 1px solid rgba(238, 239, 231, 0.12); border-radius: 9px; background: rgba(237, 238, 230, 0.09); color: rgba(249, 249, 243, 0.88); font-size: 11px; font-weight: 600; cursor: pointer; }
+.connection-error { margin: 12px 0; color: rgba(226, 158, 142, 0.9); font-size: 11.5px; line-height: 1.45; }
+.connect-button, .connection-actions button { border: 1px solid rgba(238, 239, 231, 0.12); border-radius: 9px; background: rgba(237, 238, 230, 0.09); color: rgba(249, 249, 243, 0.88); font-size: 11.5px; font-weight: 600; cursor: pointer; }
 .connect-button { width: 100%; height: 38px; }
 .connect-button:hover, .connection-actions button:hover { background: rgba(237, 238, 230, 0.14); }
 .connect-button:disabled, .connection-actions button:disabled { cursor: wait; opacity: 0.5; }
-.connection-card small { display: block; margin-top: 10px; color: rgba(228, 229, 221, 0.39); font-size: 9.5px; text-align: center; }
-.connection-text-action { display: block; margin: 8px auto 0; padding: 4px 7px; border: 0; background: transparent; color: rgba(232, 233, 225, 0.47); font-size: 10px; cursor: pointer; }
+.connection-card small { display: block; margin-top: 10px; color: rgba(228, 229, 221, 0.5); font-size: 10.5px; text-align: center; }
+.connection-text-action { display: block; margin: 8px auto 0; padding: 4px 7px; border: 0; background: transparent; color: rgba(232, 233, 225, 0.58); font-size: 10.5px; cursor: pointer; }
 .connection-text-action:hover { color: rgba(245, 246, 238, 0.68); }
 .connection-text-action:disabled { cursor: wait; opacity: 0.45; }
 .connection-actions { display: flex; gap: 8px; margin-top: 16px; }
@@ -553,18 +553,18 @@ kbd {
 .connection-actions .primary { flex: 1; }
 .connection-actions .disconnect { background: transparent; color: rgba(226, 158, 142, 0.8); }
 .ai-config-grid { display: grid; grid-template-columns: 1fr 1.35fr; gap: 10px; margin-top: 18px; }
-.ai-config-grid label { display: flex; flex-direction: column; gap: 6px; color: rgba(229, 230, 222, 0.46); font-size: 9.5px; font-weight: 650; letter-spacing: 0.04em; }
+.ai-config-grid label { display: flex; flex-direction: column; gap: 6px; color: rgba(229, 230, 222, 0.56); font-size: 10.5px; font-weight: 650; letter-spacing: 0.04em; }
 .ai-config-grid label.wide { grid-column: 1 / -1; }
-.ai-config-grid input, .ai-config-grid select { width: 100%; height: 34px; padding: 0 9px; border: 1px solid rgba(236, 237, 229, 0.1); border-radius: 8px; outline: none; background: rgba(4, 5, 4, 0.2); color: rgba(247, 248, 241, 0.84); font-size: 10.5px; }
+.ai-config-grid input, .ai-config-grid select { width: 100%; height: 34px; padding: 0 9px; border: 1px solid rgba(236, 237, 229, 0.1); border-radius: 8px; outline: none; background: rgba(4, 5, 4, 0.2); color: rgba(247, 248, 241, 0.84); font-size: 11.5px; }
 .ai-config-grid input:focus, .ai-config-grid select:focus { border-color: rgba(199, 203, 188, 0.3); }
 .input-action { display: flex; align-items: center; gap: 7px; height: 34px; padding-left: 9px; border: 1px solid rgba(236, 237, 229, 0.1); border-radius: 8px; background: rgba(4, 5, 4, 0.2); }
 .input-action > svg { flex: 0 0 auto; color: rgba(230, 231, 223, 0.34); }
 .input-action input { height: 32px; padding-left: 0; border: 0; background: transparent; }
-.input-action button { height: 25px; margin-right: 4px; padding: 0 8px; border: 1px solid rgba(236, 237, 229, 0.1); border-radius: 6px; background: rgba(235, 236, 228, 0.06); color: rgba(241, 242, 234, 0.65); font-size: 9px; cursor: pointer; }
+.input-action button { height: 25px; margin-right: 4px; padding: 0 8px; border: 1px solid rgba(236, 237, 229, 0.1); border-radius: 6px; background: rgba(235, 236, 228, 0.06); color: rgba(241, 242, 234, 0.65); font-size: 10px; cursor: pointer; }
 .ai-stats { margin-top: 14px !important; }
 .ai-actions { flex-wrap: wrap; }
 .ai-actions .primary { min-width: 138px; }
-.clear-provider { width: 100%; margin-top: 9px; border: 0; background: transparent; color: rgba(226, 158, 142, 0.58); font-size: 9px; cursor: pointer; }
+.clear-provider { width: 100%; margin-top: 9px; border: 0; background: transparent; color: rgba(226, 158, 142, 0.68); font-size: 10px; cursor: pointer; }
 .clear-provider:hover { color: rgba(232, 169, 155, 0.9); }
 
 .activity-sheet { width: min(450px, calc(100vw - 36px)); }
