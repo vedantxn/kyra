@@ -9,6 +9,7 @@
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, input { font: inherit; }
 button { color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex="-1"]:focus-visible { outline: 2px solid rgba(218, 210, 179, 0.48); outline-offset: 2px; }
 
 .app-shell {
   position: relative;
@@ -403,6 +404,7 @@ kbd {
   box-shadow: 0 42px 110px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.035);
   scrollbar-width: none;
 }
+.setup-dialog:focus { outline: none; }
 
 .setup-close {
   position: absolute;

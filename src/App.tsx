@@ -327,10 +327,40 @@ export function SetupFlow({
   onClose: () => void;
 }) {
   const [started, setStarted] = useState(status.state !== "disconnected" && status.state !== "connected");
+  const dialogRef = useRef<HTMLElement>(null);
   const ready = status.state === "connected" && Boolean(status.lastSyncAt);
   const working = busy || status.state === "connecting" || status.state === "syncing";
   const failed = started && !working && !ready && (Boolean(error || status.lastError) || status.state === "reconnect_required" || status.state === "error");
   const failureMessage = error || status.lastError || (status.state === "reconnect_required" ? "Google access has expired. Reconnect to continue synchronizing Gmail and Calendar." : "Kyra could not reach Google. Your local data is still safe.");
+  const view = ready ? "ready" : working ? "working" : failed ? "failed" : "intro";
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const preferred = dialog.querySelector<HTMLElement>("[data-setup-autofocus]");
+    (preferred ?? dialog).focus();
+  }, [view]);
+
+  const containFocus = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])"));
+    if (focusable.length === 0) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const begin = async () => {
     setStarted(true);
@@ -339,8 +369,8 @@ export function SetupFlow({
 
   return (
     <div className="setup-backdrop">
-      <section className="setup-dialog" aria-label="Set up Kyra">
-        <button className="setup-close" onClick={onClose} disabled={working} aria-label="Close setup"><X size={17} /></button>
+      <section ref={dialogRef} className="setup-dialog" role="dialog" aria-modal="true" aria-label="Set up Kyra" tabIndex={-1} onKeyDown={containFocus}>
+        <button type="button" className="setup-close" onClick={onClose} disabled={working} aria-label="Close setup"><X size={17} /></button>
         {ready ? (
           <div className="setup-ready">
             <span className="setup-success"><CheckCircle2 size={26} /></span>
@@ -352,7 +382,7 @@ export function SetupFlow({
               <div><dt>Calendar</dt><dd>{status.calendarEventCount}<span>events synchronized</span></dd></div>
             </dl>
             <p className="setup-last-sync">Last synchronized {formatSyncTime(status.lastSyncAt)}</p>
-            <button className="setup-primary" onClick={onFinish}>Open Kyra <ArrowRight size={15} /></button>
+            <button type="button" className="setup-primary" data-setup-autofocus onClick={onFinish}>Open Kyra <ArrowRight size={15} /></button>
             <p className="setup-footnote">Kyra refreshes Google every five minutes while the app is open. Intelligence can be configured later in Settings.</p>
           </div>
         ) : working ? (
@@ -369,13 +399,13 @@ export function SetupFlow({
             <p className="setup-footnote">Nothing is sent or deleted from Gmail. Closing this screen is disabled while the secure connection is in progress.</p>
           </div>
         ) : failed ? (
-          <div className="setup-error-state">
+          <div className="setup-error-state" role="alert">
             <span className="setup-error-icon"><AlertCircle size={24} /></span>
             <p className="setup-kicker">CONNECTION NEEDS ATTENTION</p>
             <h1>Google did not connect.</h1>
             <p className="setup-lede">{failureMessage}</p>
-            <button className="setup-primary" onClick={() => void begin()}>Try again <RefreshCw size={14} /></button>
-            <button className="setup-secondary" onClick={onExplore}>Use the sample day for now</button>
+            <button type="button" className="setup-primary" data-setup-autofocus onClick={() => void begin()}>Try again <RefreshCw size={14} /></button>
+            <button type="button" className="setup-secondary" onClick={onExplore}>Use the sample day for now</button>
             <p className="setup-footnote">Your local tasks are untouched. You can return to this guide from Settings.</p>
           </div>
         ) : (
@@ -394,8 +424,8 @@ export function SetupFlow({
               </div>
             </div>
             <div className="setup-actions">
-              <button className="setup-primary" onClick={() => void begin()}>Connect Gmail & Calendar <ArrowRight size={15} /></button>
-              <button className="setup-secondary" onClick={onExplore}>Explore with sample data</button>
+              <button type="button" className="setup-primary" data-setup-autofocus onClick={() => void begin()}>Connect Gmail & Calendar <ArrowRight size={15} /></button>
+              <button type="button" className="setup-secondary" onClick={onExplore}>Explore with sample data</button>
             </div>
             <p className="setup-footnote">Google will open in your system browser. Kyra uses a desktop OAuth flow and never embeds a client secret.</p>
           </>
@@ -481,10 +511,11 @@ export function ConnectionsSheet({
                 <div><dt>Gmail</dt><dd>{status.gmailMessageCount} messages</dd></div>
                 <div><dt>Calendar</dt><dd>{status.calendarEventCount} events</dd></div>
                 <div><dt>Last sync</dt><dd>{formatSyncTime(status.lastSyncAt)}</dd></div>
+                <div><dt>Next sync</dt><dd>{formatSyncTime(status.nextSyncAt)}</dd></div>
               </dl>
               {(error || status.lastError) && <p className="connection-error">{error || status.lastError}</p>}
               <div className="connection-actions">
-                {status.state === "reconnect_required" ? <button className="primary" disabled={busy} onClick={onConnect}>Reconnect</button> : <button className="primary" disabled={busy || status.state === "syncing"} onClick={onSync}><RefreshCw size={14} className={busy ? "spinning" : ""} /> Sync now</button>}
+                {status.state === "reconnect_required" ? <button className="primary" disabled={busy} onClick={onConnect}>Reconnect</button> : <button className="primary" disabled={busy || status.state === "syncing"} onClick={onSync}><RefreshCw size={14} className={busy ? "spinning" : ""} /> {busy || status.state === "syncing" ? "Syncing…" : "Sync now"}</button>}
                 <button className="disconnect" disabled={busy} onClick={onDisconnect}><Unplug size={14} /> Disconnect</button>
               </div>
             </>
