@@ -74,6 +74,7 @@ pub fn run() {
                     EffectsBuilder::new()
                         .effect(Effect::UnderWindowBackground)
                         .state(EffectState::Active)
+                        .radius(0.0)
                         .build(),
                 )?;
                 window.maximize()?;
