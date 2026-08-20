@@ -623,56 +623,60 @@ kbd {
   position: fixed;
   inset: 0;
   z-index: 20;
-  background: rgba(8, 9, 8, 0.13);
+  background: rgba(8, 9, 8, 0.18);
 }
 
 .planner {
   position: absolute;
-  top: 75px;
-  bottom: 24px;
-  left: 29px;
-  width: min(48vw, 650px);
-  min-width: 570px;
+  top: 68px;
+  bottom: 26px;
+  left: 28px;
+  width: min(55vw, 820px);
+  min-width: 650px;
   overflow: hidden;
-  border: 1px solid rgba(216, 237, 238, 0.15);
-  border-radius: 14px;
-  background: rgba(24, 26, 23, 0.84);
-  box-shadow: 0 31px 72px rgba(0, 0, 0, 0.34), inset 0 1px rgba(255, 255, 255, 0.025);
-  backdrop-filter: blur(30px) saturate(60%);
+  border: 1px solid rgba(222, 236, 234, 0.12);
+  border-radius: 10px;
+  background: rgba(20, 22, 19, 0.78);
+  box-shadow: 0 36px 84px rgba(0, 0, 0, 0.3), inset 0 1px rgba(255, 255, 255, 0.018);
+  backdrop-filter: blur(26px) saturate(56%);
 }
 
 .planner header {
   display: flex;
   align-items: center;
-  height: 72px;
-  padding: 0 16px 0 18px;
-  border-bottom: 1px solid rgba(219, 239, 239, 0.09);
+  height: 64px;
+  padding: 0 14px 0 18px;
+  border-bottom: 1px solid rgba(219, 239, 239, 0.075);
 }
 
-.planner h2 { margin: 0; color: rgba(245, 249, 247, 0.87); font-size: 14px; font-weight: 650; }
-.planner header > button { display: grid; width: 30px; height: 30px; margin-left: 10px; padding: 0; border: 1px solid rgba(222, 242, 240, 0.1); border-radius: 8px; background: rgba(224, 242, 240, 0.045); color: rgba(228, 242, 241, 0.46); cursor: pointer; place-items: center; }
+.planner-title { min-width: 0; }
+.planner h2 { margin: 0; color: rgba(245, 249, 247, 0.89); font-size: 15px; font-weight: 660; letter-spacing: -0.01em; }
+.planner-title p { margin: 3px 0 0; color: rgba(224, 238, 235, 0.36); font-size: 9px; }
+.planner header > button { display: grid; width: 34px; height: 34px; margin-left: 10px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: rgba(228, 242, 241, 0.46); cursor: pointer; place-items: center; }
+.planner header > button:hover { background: rgba(230, 241, 238, 0.05); color: rgba(239, 247, 244, 0.76); }
 
-.legend { display: flex; gap: 12px; margin-left: auto; color: rgba(225, 240, 238, 0.36); font-size: 9px; }
+.legend { display: flex; gap: 14px; margin-left: auto; color: rgba(225, 240, 238, 0.42); font-size: 9px; }
 .legend span { display: flex; align-items: center; gap: 5px; }
-.legend i { width: 7px; height: 7px; border-radius: 2px; background: #b7b9b2; }
-.legend i.execution { background: #8ca481; }
+.legend i { width: 8px; height: 2px; border-radius: 99px; background: rgba(196, 198, 190, 0.72); }
+.legend i.execution { background: rgba(145, 172, 132, 0.92); }
 
 .planner-grid {
   display: grid;
-  grid-template-columns: 48px repeat(3, minmax(0, 1fr));
-  height: calc(100% - 96px);
-  padding-right: 11px;
+  grid-template-columns: 50px repeat(3, minmax(0, 1fr));
+  height: calc(100% - 88px);
+  padding-right: 10px;
 }
 
-.planner-hours { position: relative; margin-top: 55px; }
-.planner-hours span { position: absolute; right: 8px; color: rgba(224, 239, 238, 0.29); font-size: 9px; transform: translateY(-50%); }
+.planner-hours { position: relative; margin-top: 50px; }
+.planner-hours span { position: absolute; right: 9px; color: rgba(224, 239, 238, 0.32); font-size: 9px; transform: translateY(-50%); }
 
-.planner-day { position: relative; min-width: 0; border-left: 1px solid rgba(220, 241, 240, 0.075); }
-.planner-day h3 { height: 55px; margin: 0; padding: 13px 9px 0; color: rgba(238, 246, 244, 0.74); font-size: 11px; font-weight: 600; }
-.planner-day h3 small { display: block; margin-top: 3px; color: rgba(122, 198, 143, 0.82); font-size: 8px; font-weight: 650; letter-spacing: 0.12em; }
-.planner-lines { position: absolute; inset: 55px 0 0; display: grid; grid-template-rows: repeat(16, 1fr); }
-.planner-lines i { border-top: 1px solid rgba(220, 241, 240, 0.055); }
-.planner-events { position: absolute; inset: 55px 0 0; }
+.planner-day { position: relative; min-width: 0; border-left: 1px solid rgba(220, 241, 240, 0.065); }
+.planner-day.today { background: linear-gradient(180deg, rgba(228, 239, 235, 0.018), transparent 18%); }
+.planner-day h3 { height: 50px; margin: 0; padding: 11px 10px 0; color: rgba(238, 246, 244, 0.78); font-size: 11.5px; font-weight: 620; }
+.planner-day h3 small { display: block; margin-top: 3px; color: rgba(142, 190, 126, 0.86); font-size: 7.5px; font-weight: 720; letter-spacing: 0.14em; }
+.planner-lines { position: absolute; inset: 50px 0 0; display: grid; grid-template-rows: repeat(16, 1fr); }
+.planner-lines i { border-top: 1px solid rgba(220, 241, 240, 0.05); }
+.planner-events { position: absolute; inset: 50px 0 0; }
 
 .planner-event {
   position: absolute;
@@ -680,18 +684,23 @@ kbd {
   left: 4px;
   z-index: 2;
   min-height: 26px;
-  padding: 6px 7px;
+  padding: 6px 8px;
   overflow: hidden;
-  border: 1px solid rgba(194, 195, 187, 0.31);
-  border-radius: 7px;
-  background: rgba(149, 150, 143, 0.25);
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
+  border: 0;
+  border-left: 2px solid rgba(190, 194, 186, 0.58);
+  border-radius: 4px;
+  background: rgba(174, 177, 168, 0.11);
 }
 
-.planner-event.execution { border-color: rgba(140, 164, 129, 0.4); background: rgba(92, 112, 82, 0.31); }
-.planner-event strong, .planner-event span { display: block; overflow: hidden; font-size: 9px; line-height: 1.32; white-space: nowrap; text-overflow: ellipsis; }
-.planner-event span { margin-top: 2px; color: rgba(229, 242, 240, 0.47); }
-.planner footer { position: absolute; right: 0; bottom: 0; left: 0; height: 24px; padding: 5px 16px; color: rgba(224, 239, 238, 0.25); font-size: 8px; }
+.planner-event.routine { border-left-color: rgba(194, 198, 190, 0.48); background: rgba(184, 187, 178, 0.075); }
+.planner-event.execution { border-left-color: rgba(144, 176, 130, 0.78); background: rgba(107, 134, 95, 0.14); }
+.planner-event strong, .planner-event span { display: block; overflow: hidden; font-size: 9.5px; line-height: 1.34; white-space: nowrap; text-overflow: ellipsis; }
+.planner-event strong { color: rgba(244, 247, 243, 0.82); font-weight: 640; }
+.planner-event span { margin-top: 2px; color: rgba(229, 242, 240, 0.5); }
+.planner-now { position: absolute; right: 0; left: 0; z-index: 5; height: 1px; background: linear-gradient(90deg, rgba(157, 183, 141, 0.84), rgba(157, 183, 141, 0.18)); pointer-events: none; }
+.planner-now i { position: absolute; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: #a5bc93; box-shadow: 0 0 9px rgba(165, 188, 147, 0.3); }
+.planner-now span { position: absolute; top: -15px; left: 6px; padding: 0 3px; background: rgba(20, 22, 19, 0.86); color: rgba(205, 221, 194, 0.74); font-size: 7.5px; }
+.planner footer { position: absolute; right: 0; bottom: 0; left: 0; height: 24px; padding: 6px 18px; border-top: 1px solid rgba(220, 239, 237, 0.045); color: rgba(224, 239, 238, 0.3); font-size: 8px; }
 
 .loading,
 .fatal { display: grid; width: 100%; height: 100%; gap: 20px; place-content: center; place-items: center; background: #1b1e1b; color: rgba(244, 242, 233, 0.7); }

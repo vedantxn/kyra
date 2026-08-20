@@ -265,19 +265,25 @@ function Planner({ blocks, showDemo, onClose }: { blocks: CalendarBlock[]; showD
     { id: "aditya", title: "Sahil (Kyra) / Aditya", startAt: plannerDate(2, 10), endAt: plannerDate(2, 10, 30), kind: "meeting", color: "#b7b9b2", origin: "demo", plannerDay: 2 },
   ];
   const plannerBlocks = [...(showDemo ? recurring : []), ...supplied, ...(showDemo ? samples : [])];
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes() - 60;
+  const nowVisible = nowMinutes >= 0 && nowMinutes <= 960;
 
   return (
     <div className="planner-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="planner" aria-label="Next three days">
         <header>
-          <h2>Next three days</h2>
+          <div className="planner-title">
+            <h2>Next three days</h2>
+            <p>{formatDay(days[0].toISOString())} – {formatDay(days[2].toISOString())}</p>
+          </div>
           <div className="legend"><span><i className="meeting" /> meeting</span><span><i className="execution" /> execution</span></div>
           <button onClick={onClose} aria-label="Close calendar"><X size={16} /></button>
         </header>
         <div className="planner-grid">
           <div className="planner-hours">{hours.map((hour) => <span key={hour} style={{ top: `${((hour - 1) / 16) * 100}%` }}>{new Intl.DateTimeFormat("en", { hour: "numeric" }).format(new Date(2026, 0, 1, hour))}</span>)}</div>
           {days.map((day, dayIndex) => (
-            <div className="planner-day" key={day.toISOString()}>
+            <div className={`planner-day ${dayIndex === 0 ? "today" : ""}`} key={day.toISOString()}>
               <h3>{formatDay(day.toISOString())}<small>{dayIndex === 0 ? "TODAY" : dayIndex === 1 ? "TOMORROW" : ""}</small></h3>
               <div className="planner-lines">{hours.map((hour) => <i key={hour} />)}</div>
               <div className="planner-events">
@@ -292,11 +298,16 @@ function Planner({ blocks, showDemo, onClose }: { blocks: CalendarBlock[]; showD
                     </article>
                   );
                 })}
+                {dayIndex === 0 && nowVisible && (
+                  <div className="planner-now" style={{ top: `${(nowMinutes / 960) * 100}%` }} aria-label={`Current time ${formatTime(now.toISOString())}`}>
+                    <i /><span>{formatTime(now.toISOString())}</span>
+                  </div>
+                )}
               </div>
             </div>
           ))}
         </div>
-        <footer>drag a block to move it · its edges to resize · empty grid for a new one</footer>
+        <footer>Google Calendar stays in sync while Kyra is open.</footer>
       </section>
     </div>
   );
