@@ -12,6 +12,37 @@ use tauri::window::{Effect, EffectState, EffectsBuilder};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+#[cfg(target_os = "macos")]
+const NATIVE_MATERIAL_OPACITY: f64 = 0.78;
+
+#[cfg(target_os = "macos")]
+fn set_native_material_opacity(root_view: *mut std::ffi::c_void) {
+    use objc2_app_kit::NSView;
+
+    // window-vibrancy tags the NSVisualEffectView it inserts with this value.
+    // Lowering only that view's opacity blends the recognizable desktop back in
+    // while retaining one permanently active native material across focus changes.
+    const BLUR_VIEW_TAG: isize = 91_376_254;
+
+    // SAFETY: Tauri guarantees `ns_view` is an NSView pointer on the macOS main thread.
+    let root_view = unsafe { &*(root_view.cast::<NSView>()) };
+    if let Some(material_view) = root_view.viewWithTag(BLUR_VIEW_TAG) {
+        material_view.setAlphaValue(NATIVE_MATERIAL_OPACITY);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn soften_native_material(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    set_native_material_opacity(window.ns_view()?);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn stabilize_native_material(window: &tauri::Window) -> tauri::Result<()> {
+    set_native_material_opacity(window.ns_view()?);
+    Ok(())
+}
+
 pub struct AppState {
     pool: SqlitePool,
     cipher: crypto::LocalCipher,
@@ -41,6 +72,15 @@ pub fn run() {
                 })
                 .build(),
         )
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Focused(_)) {
+                let stable_window = window.clone();
+                let _ = window.run_on_main_thread(move || {
+                    let _ = stabilize_native_material(&stable_window);
+                });
+            }
+        })
         .setup(move |app| {
             let (pool, cipher) = tauri::async_runtime::block_on(db::initialize(app.handle()))?;
             let google = google::GoogleConnector::new(pool.clone());
@@ -77,6 +117,8 @@ pub fn run() {
                         .radius(0.0)
                         .build(),
                 )?;
+                #[cfg(target_os = "macos")]
+                soften_native_material(&window)?;
                 window.maximize()?;
                 window.show()?;
                 window.set_focus()?;

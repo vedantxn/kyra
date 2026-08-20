@@ -2545,6 +2545,7 @@ dependencies = [
  "html2text",
  "iana-time-zone",
  "keyring",
+ "objc2-app-kit",
  "regex",
  "reqwest",
  "serde",
