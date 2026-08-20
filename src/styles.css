@@ -3,6 +3,10 @@
   color: rgba(246, 245, 238, 0.9);
   background: transparent;
   font-synthesis: none;
+  --workspace-tint-left: rgba(14, 16, 14, 0.42);
+  --workspace-tint-center: rgba(25, 26, 23, 0.3);
+  --workspace-tint-right: rgba(54, 52, 45, 0.2);
+  --workspace-tint-edge: rgba(79, 75, 63, 0.14);
 }
 
 * { box-sizing: border-box; }
@@ -20,15 +24,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex="-1"]
   min-height: 680px;
   overflow: hidden;
   isolation: isolate;
-  background: linear-gradient(102deg, rgba(14, 17, 16, 0.84) 0%, rgba(25, 27, 25, 0.75) 39%, rgba(47, 47, 43, 0.62) 73%, rgba(75, 73, 66, 0.52) 100%);
-  backdrop-filter: blur(52px) saturate(54%) brightness(70%);
+  background: linear-gradient(102deg, var(--workspace-tint-left) 0%, var(--workspace-tint-center) 39%, var(--workspace-tint-right) 73%, var(--workspace-tint-edge) 100%);
 }
 
 .timeline-panel {
   position: relative;
   min-width: 0;
   padding: 48px 24px 30px 44px;
-  background: linear-gradient(90deg, rgba(4, 6, 5, 0.22), rgba(15, 16, 14, 0.04));
+  background: linear-gradient(90deg, rgba(4, 6, 5, 0.1), transparent);
 }
 
 .date-button {
@@ -204,13 +207,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex="-1"]
   left: 44.2%;
   z-index: 5;
   width: min(525px, calc(100% - 34px));
-  padding: 8px;
+  padding: 4px;
   overflow: hidden;
-  border: 1px solid rgba(220, 240, 239, 0.12);
-  border-radius: 19px;
-  background: rgba(22, 24, 22, 0.72);
-  box-shadow: 0 24px 58px rgba(0, 0, 0, 0.24), inset 0 1px rgba(255, 255, 255, 0.025);
-  backdrop-filter: blur(32px) saturate(60%);
+  border: 1px solid rgba(228, 238, 234, 0.09);
+  border-radius: 12px;
+  background: rgba(22, 24, 21, 0.38);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(24px) saturate(72%);
   transform: translateX(-50%);
 }
 
@@ -227,10 +230,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex="-1"]
 .command-input input::placeholder { color: rgba(226, 238, 237, 0.34); }
 
 kbd {
-  padding: 5px 8px;
-  border: 1px solid rgba(229, 244, 242, 0.07);
-  border-radius: 7px;
-  background: rgba(228, 244, 241, 0.07);
+  padding: 4px 6px;
+  border: 1px solid rgba(229, 244, 242, 0.06);
+  border-radius: 4px;
+  background: rgba(228, 244, 241, 0.04);
   color: rgba(229, 242, 241, 0.36);
   font-size: 9px;
   font-weight: 700;
@@ -244,14 +247,14 @@ kbd {
   min-height: 42px;
   padding: 0 12px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   background: transparent;
   text-align: left;
   cursor: pointer;
 }
 
 .command-palette > button:hover,
-.command-palette > button.active { background: rgba(235, 233, 222, 0.1); }
+.command-palette > button.active { background: rgba(235, 233, 222, 0.075); }
 .command-palette > button strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
 .command-palette > button span { overflow: hidden; color: rgba(225, 239, 238, 0.34); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
 .command-palette > button b { color: rgba(225, 240, 238, 0.29); font-size: 13px; }
@@ -304,8 +307,8 @@ kbd {
 .loop-check:hover { color: rgba(161, 218, 147, 0.85); }
 .loop-card h3 { margin: 0 0 5px; color: rgba(245, 248, 245, 0.88); font-size: 15.5px; font-weight: 650; line-height: 1.34; }
 .loop-card p { margin: 0; color: rgba(225, 237, 235, 0.4); font-size: 11.5px; font-weight: 500; line-height: 1.48; }
-.loop-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-.loop-meta span { padding: 2px 6px; border: 1px solid rgba(232, 233, 225, 0.08); border-radius: 99px; color: rgba(229, 230, 222, 0.38); font-size: 8px; letter-spacing: 0.03em; }
+.loop-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
+.loop-meta span { color: rgba(229, 230, 222, 0.38); font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; }
 .empty-state { display: flex; align-items: center; gap: 8px; margin-left: 28px; color: rgba(225, 240, 238, 0.45); font-size: 12px; }
 
 .loop-count {
