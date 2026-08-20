@@ -20,8 +20,15 @@ fn native_blur_is_not_dimmed_by_a_second_full_screen_filter() {
 
 #[test]
 fn focus_palette_and_metadata_avoid_heavy_card_and_pill_treatment() {
-    assert!(rule_body(".command-palette").contains("border-radius: 12px"));
-    assert!(rule_body(".command-palette").contains("background: rgba(22, 24, 21, 0.38)"));
+    assert!(rule_body(".command-palette").contains("border-radius: 11px"));
+    assert!(rule_body(".command-palette").contains("background: rgba(20, 22, 19, 0.43)"));
     assert!(!rule_body(".loop-meta span").contains("border-radius"));
     assert!(!rule_body(".loop-meta span").contains("border:"));
+}
+
+#[test]
+fn interface_motion_has_an_explicit_reduced_motion_path() {
+    assert!(STYLES.contains("@media (prefers-reduced-motion: reduce)"));
+    assert!(STYLES.contains("animation-duration: 0.001ms !important"));
+    assert!(STYLES.contains("transition-duration: 0.001ms !important"));
 }
