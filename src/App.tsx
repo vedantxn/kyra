@@ -139,12 +139,14 @@ function CommandPalette({
   const [message, setMessage] = useState("");
   const [sessionId, setSessionId] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const focus = (event: KeyboardEvent) => {
       if (event.metaKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        setFocused(true);
         inputRef.current?.focus();
       }
     };
@@ -190,17 +192,32 @@ function CommandPalette({
 
   return (
     <>
-      <form className="command-palette" onSubmit={submit}>
+      <form
+        className={`command-palette ${focused || value || sessionId ? "expanded" : ""}`}
+        onSubmit={submit}
+        onFocus={() => setFocused(true)}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+        }}
+      >
         <div className="command-input">
           <Search size={22} />
           <input
             ref={inputRef}
             value={value}
             onChange={(event) => { setValue(event.target.value); setMessage(""); }}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              setFocused(false);
+              inputRef.current?.blur();
+            }}
             placeholder={sessionId ? "Answer Kyra’s question…" : "What do you wanna get done?"}
             aria-label="Kyra command"
+            aria-expanded={focused || Boolean(value) || Boolean(sessionId)}
           />
-          <kbd>ESC</kbd>
+          <kbd>{focused ? "ESC" : "⌘K"}</kbd>
         </div>
         <button type="button" onClick={() => { setValue("/cal "); inputRef.current?.focus(); }} className={value === "" || value.startsWith("/cal") ? "active" : ""}>
           <CalendarDays size={16} /><strong>/cal</strong><span>what and when — e.g. standup tomorrow 9am</span><b>↵</b>
