@@ -1,17 +1,19 @@
 fn main() {
     println!("cargo:rerun-if-changed=../.env.local");
     if let Ok(contents) = std::fs::read_to_string("../.env.local") {
-        if let Some(client_id) = contents.lines().find_map(|line| {
-            let line = line.trim();
-            if line.starts_with('#') {
-                return None;
+        for env_key in ["KYRA_GOOGLE_CLIENT_ID", "KYRA_GOOGLE_CLIENT_SECRET"] {
+            if let Some(value) = contents.lines().find_map(|line| {
+                let line = line.trim();
+                if line.starts_with('#') {
+                    return None;
+                }
+                let (key, value) = line.split_once('=')?;
+                (key.trim() == env_key)
+                    .then(|| value.trim().trim_matches(['\'', '"']).to_owned())
+                    .filter(|value| !value.is_empty())
+            }) {
+                println!("cargo:rustc-env={env_key}={value}");
             }
-            let (key, value) = line.split_once('=')?;
-            (key.trim() == "KYRA_GOOGLE_CLIENT_ID")
-                .then(|| value.trim().trim_matches(['\'', '"']).to_owned())
-                .filter(|value| !value.is_empty())
-        }) {
-            println!("cargo:rustc-env=KYRA_GOOGLE_CLIENT_ID={client_id}");
         }
     }
 

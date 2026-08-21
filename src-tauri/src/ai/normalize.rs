@@ -117,6 +117,27 @@ pub fn redact_known_aliases(
         })
 }
 
+pub fn redact_known_targets(
+    text: &str,
+    aliases: &HashMap<String, String>,
+    target_kind: &str,
+) -> String {
+    let mut aliases: Vec<_> = aliases.iter().collect();
+    aliases.sort_by_key(|(alias, _)| std::cmp::Reverse(alias.len()));
+    aliases
+        .into_iter()
+        .fold(text.to_owned(), |output, (alias, target_id)| {
+            if alias.trim().is_empty() {
+                output
+            } else {
+                let token = format!("[{target_kind}:{target_id}]");
+                Regex::new(&format!("(?i){}", regex::escape(alias)))
+                    .map(|pattern| pattern.replace_all(&output, token.as_str()).into_owned())
+                    .unwrap_or(output)
+            }
+        })
+}
+
 fn normalize_body(body: &str) -> String {
     let line_endings_normalized = body.replace("\r\n", "\n").replace('\r', "\n");
     let mut kept = Vec::new();
@@ -212,5 +233,22 @@ mod tests {
         assert!(document.text.contains("FIRST"));
         assert!(document.text.contains("NEWEST"));
         assert!(document.text.len() <= MAX_DOCUMENT_BYTES);
+    }
+
+    #[test]
+    fn replaces_known_calendar_titles_with_exact_target_ids() {
+        let aliases = HashMap::from([(
+            "Kyra QA Final Sync Check".to_owned(),
+            "event-123".to_owned(),
+        )]);
+
+        assert_eq!(
+            redact_known_targets(
+                "Delete kyra qa final sync check without notifying anyone.",
+                &aliases,
+                "calendar",
+            ),
+            "Delete [calendar:event-123] without notifying anyone."
+        );
     }
 }

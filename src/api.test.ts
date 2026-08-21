@@ -93,7 +93,7 @@ describe("native AI engine API", () => {
     mockIPC((command, payload) => {
       calls.push({ command, payload });
       if (command === "test_ai_provider") {
-        return { fingerprint: "fp", provider: "openai", requestedModel: "gpt-test", resolvedModel: "gpt-test-2026", casesRun: 12, schemaValidity: 1, evidenceValidity: 1, requiredActionCoverage: 1, confirmedMeetingRecall: 1, unauthorizedActions: 0, ambiguousCalendarActions: 0, maxLatencyMs: 10, passed: true };
+        return { fingerprint: "fp", provider: "openai", requestedModel: "gpt-test", resolvedModel: "gpt-test-2026", casesRun: 12, schemaValidity: 1, evidenceValidity: 1, requiredActionCoverage: 1, confirmedMeetingRecall: 1, unauthorizedActions: 0, ambiguousCalendarActions: 0, maxLatencyMs: 10, failedCases: [], passed: true };
       }
       if (command === "execute_ai_command") return { kind: "executed", actionIds: ["action-1"] };
       if (command === "list_ai_reviews") return [{ id: "review-1", kind: "task_ambiguous", title: "Check this", summary: "Identity is ambiguous.", evidence: ["exact quote"], irreversibleEffects: [], createdAt: "2026-08-18T00:00:00Z" }];

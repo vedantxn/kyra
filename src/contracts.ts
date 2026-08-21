@@ -130,6 +130,7 @@ export const activationReportSchema = z.object({
   unauthorizedActions: z.number(),
   ambiguousCalendarActions: z.number(),
   maxLatencyMs: z.number(),
+  failedCases: z.array(z.string()),
   passed: z.boolean(),
 });
 

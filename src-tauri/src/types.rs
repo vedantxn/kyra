@@ -129,7 +129,11 @@ pub struct GoogleSyncSummary {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum CalendarWhen {
     Timed {
         start_at: String,
@@ -197,7 +201,11 @@ fn default_send_updates() -> String {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
+#[serde(
+    tag = "action",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum CalendarMutationInput {
     Create {
         operation_id: String,
@@ -224,4 +232,53 @@ pub struct CalendarMutationResult {
     pub operation_id: String,
     pub event: Option<CalendarBlock>,
     pub deleted: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn calendar_mutation_accepts_frontend_camel_case_variant_fields() {
+        let input: CalendarMutationInput = serde_json::from_value(json!({
+            "action": "create",
+            "operationId": "op-1",
+            "event": {
+                "title": "Kyra QA Sync Test",
+                "when": {
+                    "kind": "timed",
+                    "startAt": "2026-08-22T23:30:00+05:30",
+                    "endAt": "2026-08-22T23:45:00+05:30",
+                    "timeZone": "Asia/Kolkata"
+                },
+                "attendees": [],
+                "recurrence": [],
+                "sendUpdates": "none"
+            }
+        }))
+        .unwrap();
+
+        match input {
+            CalendarMutationInput::Create {
+                operation_id,
+                event:
+                    CalendarEventInput {
+                        when:
+                            CalendarWhen::Timed {
+                                start_at,
+                                end_at,
+                                time_zone,
+                            },
+                        ..
+                    },
+            } => {
+                assert_eq!(operation_id, "op-1");
+                assert_eq!(start_at, "2026-08-22T23:30:00+05:30");
+                assert_eq!(end_at, "2026-08-22T23:45:00+05:30");
+                assert_eq!(time_zone, "Asia/Kolkata");
+            }
+            _ => panic!("expected a timed create mutation"),
+        }
+    }
 }

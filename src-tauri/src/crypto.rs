@@ -2,11 +2,13 @@ use aes_gcm::{
     aead::{Aead, Generate, Key, KeyInit},
     Aes256Gcm, Nonce,
 };
-use keyring::{Entry, Error as KeyringError};
 use serde::{de::DeserializeOwned, Serialize};
 use sha2::Sha256;
 
-const SERVICE: &str = "com.vedant.kyra.ai";
+use crate::credential_store;
+
+// Keep the finished demo build separate from credentials authorized for older builds.
+const SERVICE: &str = "com.vedant.kyra.ai.v2";
 const ACCOUNT: &str = "application-data-key";
 
 #[derive(Debug, thiserror::Error)]
@@ -26,18 +28,17 @@ pub struct LocalCipher {
 
 impl LocalCipher {
     pub fn load_or_create(has_encrypted_data: bool) -> Result<Self, CryptoError> {
-        let entry = Entry::new(SERVICE, ACCOUNT).map_err(|_| CryptoError::Keychain)?;
-        match entry.get_secret() {
-            Ok(secret) => Self::from_bytes(secret),
-            Err(KeyringError::NoEntry) if !has_encrypted_data => {
+        match credential_store::load(SERVICE, ACCOUNT).map_err(|_| CryptoError::Keychain)? {
+            Some(secret) => Self::from_bytes(secret),
+            None => {
+                if has_encrypted_data {
+                    return Err(CryptoError::MissingKey);
+                }
                 let key = Key::<Aes256Gcm>::generate();
-                entry
-                    .set_secret(key.as_slice())
+                credential_store::store(SERVICE, ACCOUNT, key.as_slice())
                     .map_err(|_| CryptoError::Keychain)?;
                 Self::from_bytes(key.as_slice().to_vec())
             }
-            Err(KeyringError::NoEntry) => Err(CryptoError::MissingKey),
-            Err(_) => Err(CryptoError::Keychain),
         }
     }
 

@@ -826,7 +826,11 @@ export default function App() {
     setAiEngine((current) => ({ ...current, state: "testing" }));
     try {
       const report = await testAiProvider();
-      if (!report.passed) throw new Error("This model did not pass Kyra’s 12-case safety activation.");
+      if (!report.passed) {
+        const percent = (value: number) => `${Math.round(value * 100)}%`;
+        const cases = report.failedCases.length > 0 ? ` Failed cases: ${report.failedCases.join("; ")}.` : "";
+        throw new Error(`Safety activation failed: ${percent(report.evidenceValidity)} evidence validity, ${percent(report.requiredActionCoverage)} required-action coverage, ${percent(report.confirmedMeetingRecall)} confirmed-meeting recall, ${report.unauthorizedActions} unauthorized actions.${cases}`);
+      }
       await refreshAiActivity();
     } catch (cause) {
       setAiError(cause instanceof Error ? cause.message : String(cause));

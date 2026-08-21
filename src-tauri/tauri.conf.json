@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "node scripts/prepare-macos-signing.mjs && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -39,7 +39,7 @@
     "active": true,
     "targets": ["app", "dmg"],
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "Kyra Stable Local Development"
     },
     "category": "Productivity",
     "shortDescription": "Close the right loops at the right time.",

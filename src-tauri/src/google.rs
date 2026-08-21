@@ -14,7 +14,6 @@ use base64::{
 };
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use futures::{stream, StreamExt, TryStreamExt};
-use keyring::{Entry, Error as KeyringError};
 use reqwest::{Client, Response, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -30,12 +29,14 @@ use tokio::{
 use url::Url;
 use uuid::Uuid;
 
+use crate::credential_store;
 use crate::types::{
     CalendarBlock, CalendarEventInput, CalendarEventPatch, CalendarMutationInput,
     CalendarMutationResult, CalendarWhen, GoogleConnectorStatus, GoogleSyncSummary,
 };
 
-const GOOGLE_KEYCHAIN_SERVICE: &str = "com.vedant.kyra.google";
+// Keep the finished demo build separate from credentials authorized for older builds.
+const GOOGLE_KEYCHAIN_SERVICE: &str = "com.vedant.kyra.google.v2";
 const GOOGLE_SCOPES: &str = "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.events";
 const FIVE_MINUTES: i64 = 5;
 const GMAIL_LIMIT: usize = 500;
@@ -362,6 +363,7 @@ pub struct GoogleConnector {
     client: Client,
     endpoints: GoogleEndpoints,
     client_id: Option<String>,
+    client_secret: Option<String>,
     sync_lock: Mutex<()>,
     tokens: Mutex<HashMap<String, CachedToken>>,
 }
@@ -374,6 +376,11 @@ impl GoogleConnector {
             .or_else(|| option_env!("KYRA_GOOGLE_CLIENT_ID").map(str::to_owned))
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
+        let client_secret = std::env::var("KYRA_GOOGLE_CLIENT_SECRET")
+            .ok()
+            .or_else(|| option_env!("KYRA_GOOGLE_CLIENT_SECRET").map(str::to_owned))
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
         Arc::new(Self {
             pool,
             client: Client::builder()
@@ -383,6 +390,7 @@ impl GoogleConnector {
                 .expect("failed to build Google HTTP client"),
             endpoints: GoogleEndpoints::default(),
             client_id,
+            client_secret,
             sync_lock: Mutex::new(()),
             tokens: Mutex::new(HashMap::new()),
         })
@@ -398,6 +406,7 @@ impl GoogleConnector {
                 .unwrap(),
             endpoints,
             client_id: Some("test-client".to_owned()),
+            client_secret: None,
             sync_lock: Mutex::new(()),
             tokens: Mutex::new(HashMap::new()),
         })
@@ -497,17 +506,18 @@ impl GoogleConnector {
         .await
         .map_err(|_| GoogleError::OAuthTimeout)??;
         let code = validate_oauth_callback(callback, &state)?;
+        let mut token_form = vec![
+            ("client_id", client_id.as_str()),
+            ("code", code.as_str()),
+            ("code_verifier", verifier.as_str()),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", redirect_uri.as_str()),
+        ];
+        if let Some(client_secret) = self.client_secret.as_deref() {
+            token_form.push(("client_secret", client_secret));
+        }
         let token: TokenResponse = self
-            .post_form_json(
-                &self.endpoints.token,
-                &[
-                    ("client_id", client_id.as_str()),
-                    ("code", code.as_str()),
-                    ("code_verifier", verifier.as_str()),
-                    ("grant_type", "authorization_code"),
-                    ("redirect_uri", redirect_uri.as_str()),
-                ],
-            )
+            .post_form_json(&self.endpoints.token, &token_form)
             .await?;
         let refresh_token = token.refresh_token.ok_or(GoogleError::ReconnectRequired)?;
         let user: UserInfo = self
@@ -515,7 +525,10 @@ impl GoogleConnector {
             .await?
             .json()
             .await
-            .map_err(|_| GoogleError::Provider)?;
+            .map_err(|error| {
+                eprintln!("google oauth userinfo decode failed: {error}");
+                GoogleError::Provider
+            })?;
 
         if let Ok(previous) = self.account().await {
             self.remove_account(&previous.id).await?;
@@ -641,14 +654,18 @@ impl GoogleConnector {
         }
         let client_id = self.client_id.clone().ok_or(GoogleError::MissingClientId)?;
         let refresh_token = load_refresh_token(&account.id)?;
+        let mut token_form = vec![
+            ("client_id", client_id.as_str()),
+            ("refresh_token", refresh_token.as_str()),
+            ("grant_type", "refresh_token"),
+        ];
+        if let Some(client_secret) = self.client_secret.as_deref() {
+            token_form.push(("client_secret", client_secret));
+        }
         let response = self
             .client
             .post(&self.endpoints.token)
-            .form(&[
-                ("client_id", client_id.as_str()),
-                ("refresh_token", refresh_token.as_str()),
-                ("grant_type", "refresh_token"),
-            ])
+            .form(&token_form)
             .send()
             .await
             .map_err(|_| GoogleError::Network)?;
@@ -697,10 +714,32 @@ impl GoogleConnector {
             .send()
             .await
             .map_err(|_| GoogleError::Network)?;
-        checked_response(response)?
-            .json()
-            .await
-            .map_err(|_| GoogleError::Provider)
+        let status = response.status();
+        let body = response.text().await.map_err(|_| GoogleError::Network)?;
+        if !status.is_success() {
+            let provider_error = serde_json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|value| {
+                    let code = value.get("error")?.as_str()?;
+                    let description = value
+                        .get("error_description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("no description");
+                    Some(format!("{code}: {description}"))
+                })
+                .unwrap_or_else(|| "unparseable provider error".to_owned());
+            eprintln!("google oauth token exchange failed: HTTP {status} ({provider_error})");
+            return match status {
+                StatusCode::UNAUTHORIZED => Err(GoogleError::ReconnectRequired),
+                StatusCode::TOO_MANY_REQUESTS => Err(GoogleError::RateLimited),
+                status if status.is_server_error() => Err(GoogleError::Network),
+                _ => Err(GoogleError::Provider),
+            };
+        }
+        serde_json::from_str(&body).map_err(|error| {
+            eprintln!("google oauth token decode failed: {error}");
+            GoogleError::Provider
+        })
     }
 
     async fn set_account_error(
@@ -1228,6 +1267,9 @@ impl GoogleConnector {
         else {
             return Ok(false);
         };
+        let Some(next_sync_token) = next_sync_token else {
+            return Ok(false);
+        };
         let generation_id = Uuid::new_v4().to_string();
         let account_generation: i64 =
             sqlx::query_scalar("SELECT generation FROM connector_accounts WHERE id = ?")
@@ -1276,7 +1318,7 @@ impl GoogleConnector {
         access_token: &str,
         sync_token: Option<&str>,
         window: Option<(&str, &str)>,
-    ) -> Result<Option<(Vec<StoredCalendarEvent>, String)>, GoogleError> {
+    ) -> Result<Option<(Vec<StoredCalendarEvent>, Option<String>)>, GoogleError> {
         let mut page_token: Option<String> = None;
         let mut events = Vec::new();
         let next_sync_token = loop {
@@ -1304,23 +1346,43 @@ impl GoogleConnector {
                 request = request.query(&[("pageToken", token)]);
             }
             let response = request.send().await.map_err(|_| GoogleError::Network)?;
-            if response.status() == StatusCode::GONE {
+            let status = response.status();
+            if status == StatusCode::GONE {
                 return Ok(None);
             }
-            let page: CalendarListResponse = checked_response(response)?
-                .json()
-                .await
-                .map_err(|_| GoogleError::Provider)?;
+            let body = response.text().await.map_err(|_| GoogleError::Network)?;
+            if !status.is_success() {
+                let provider_error = serde_json::from_str::<Value>(&body)
+                    .ok()
+                    .and_then(|value| {
+                        let error = value.get("error")?;
+                        let code = error.get("code").and_then(Value::as_i64)?;
+                        let status = error
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown");
+                        Some(format!("{code}/{status}"))
+                    })
+                    .unwrap_or_else(|| "unparseable".to_owned());
+                eprintln!("google calendar list failed: HTTP {status} ({provider_error})");
+                return match status {
+                    StatusCode::UNAUTHORIZED => Err(GoogleError::ReconnectRequired),
+                    StatusCode::TOO_MANY_REQUESTS => Err(GoogleError::RateLimited),
+                    status if status.is_server_error() => Err(GoogleError::Network),
+                    _ => Err(GoogleError::Provider),
+                };
+            }
+            let page: CalendarListResponse = serde_json::from_str(&body).map_err(|error| {
+                eprintln!("google calendar response decoding failed: {error}");
+                GoogleError::Provider
+            })?;
             events.extend(page.items.into_iter().map(calendar_event_to_stored));
             page_token = page.next_page_token;
             if page_token.is_none() {
                 break page.next_sync_token;
             }
         };
-        Ok(Some((
-            events,
-            next_sync_token.ok_or(GoogleError::Provider)?,
-        )))
+        Ok(Some((events, next_sync_token)))
     }
 
     pub async fn calendar_blocks(&self) -> Result<Vec<CalendarBlock>, GoogleError> {
@@ -1415,6 +1477,40 @@ impl GoogleConnector {
             attendees: event.attendees,
             recurrence: event.recurrence,
         })
+    }
+
+    pub(crate) async fn ai_calendar_aliases(
+        &self,
+        account_id: &str,
+    ) -> Result<HashMap<String, String>, GoogleError> {
+        let account = self.account().await?;
+        if account.id != account_id {
+            return Err(GoogleError::NotConnected);
+        }
+        let key = load_data_key(account_id)?;
+        let rows = sqlx::query_as::<_, (String, Vec<u8>, Vec<u8>)>(
+            "SELECT external_id, nonce, ciphertext FROM provider_items WHERE account_id = ? AND kind = 'calendar_event' AND status != 'cancelled'",
+        )
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut candidates: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        for (external_id, nonce, ciphertext) in rows {
+            let event: StoredCalendarEvent = decrypt_value(&key, &nonce, &ciphertext)?;
+            let title = event.title.trim();
+            if !title.is_empty() {
+                candidates
+                    .entry(title.to_lowercase())
+                    .or_default()
+                    .push((title.to_owned(), external_id));
+            }
+        }
+        Ok(candidates
+            .into_values()
+            .filter_map(|mut entries| {
+                (entries.len() == 1).then(|| entries.pop().expect("one calendar alias"))
+            })
+            .collect())
     }
 
     pub async fn mutate_calendar(
@@ -2463,41 +2559,43 @@ fn decrypt_value<T: DeserializeOwned>(
     serde_json::from_slice(&plaintext).map_err(|_| GoogleError::Crypto)
 }
 
-fn keychain_entry(account_id: &str, kind: &str) -> Result<Entry, GoogleError> {
-    Entry::new(GOOGLE_KEYCHAIN_SERVICE, &format!("{account_id}:{kind}"))
-        .map_err(|_| GoogleError::Keychain)
-}
-
 fn store_refresh_token(account_id: &str, token: &str) -> Result<(), GoogleError> {
-    keychain_entry(account_id, "refresh_token")?
-        .set_password(token)
-        .map_err(|_| GoogleError::Keychain)
+    credential_store::store(
+        GOOGLE_KEYCHAIN_SERVICE,
+        &format!("{account_id}:refresh_token"),
+        token.as_bytes(),
+    )
+    .map_err(|_| GoogleError::Keychain)
 }
 
 fn load_refresh_token(account_id: &str) -> Result<String, GoogleError> {
-    keychain_entry(account_id, "refresh_token")?
-        .get_password()
-        .map_err(|_| GoogleError::ReconnectRequired)
+    let account = format!("{account_id}:refresh_token");
+    let secret = credential_store::load(GOOGLE_KEYCHAIN_SERVICE, &account)
+        .map_err(|_| GoogleError::Keychain)?
+        .ok_or(GoogleError::ReconnectRequired)?;
+    String::from_utf8(secret).map_err(|_| GoogleError::Keychain)
 }
 
 fn store_data_key(account_id: &str, key: &[u8; 32]) -> Result<(), GoogleError> {
-    keychain_entry(account_id, "data_key")?
-        .set_secret(key)
-        .map_err(|_| GoogleError::Keychain)
+    credential_store::store(
+        GOOGLE_KEYCHAIN_SERVICE,
+        &format!("{account_id}:data_key"),
+        key,
+    )
+    .map_err(|_| GoogleError::Keychain)
 }
 
 fn load_data_key(account_id: &str) -> Result<[u8; 32], GoogleError> {
-    let secret = keychain_entry(account_id, "data_key")?
-        .get_secret()
-        .map_err(|_| GoogleError::Keychain)?;
+    let account = format!("{account_id}:data_key");
+    let secret = credential_store::load(GOOGLE_KEYCHAIN_SERVICE, &account)
+        .map_err(|_| GoogleError::Keychain)?
+        .ok_or(GoogleError::Keychain)?;
     secret.try_into().map_err(|_| GoogleError::Crypto)
 }
 
 fn delete_secret(account_id: &str, kind: &str) -> Result<(), GoogleError> {
-    match keychain_entry(account_id, kind)?.delete_credential() {
-        Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
-        Err(_) => Err(GoogleError::Keychain),
-    }
+    credential_store::delete(GOOGLE_KEYCHAIN_SERVICE, &format!("{account_id}:{kind}"))
+        .map_err(|_| GoogleError::Keychain)
 }
 
 fn checked_response(response: Response) -> Result<Response, GoogleError> {
@@ -3050,6 +3148,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bounded_calendar_response_without_sync_token_is_valid() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/calendar/calendars/primary/events"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [{
+                    "id": "event-1", "etag": "v1", "status": "confirmed", "summary": "Demo",
+                    "start": {"dateTime": "2026-08-21T10:00:00Z"},
+                    "end": {"dateTime": "2026-08-21T11:00:00Z"}
+                }]
+            })))
+            .mount(&server)
+            .await;
+        let connector = GoogleConnector::with_endpoints(
+            crate::db::memory_pool().await,
+            GoogleEndpoints {
+                calendar: format!("{}/calendar", server.uri()),
+                ..GoogleEndpoints::default()
+            },
+        );
+        let result = connector
+            .fetch_calendar_pages(
+                "token",
+                None,
+                Some(("2026-07-22T00:00:00Z", "2026-11-20T00:00:00Z")),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.1, None);
+    }
+
+    #[tokio::test]
     async fn calendar_pagination_returns_all_events_and_final_sync_token() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -3094,7 +3226,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(result.0.len(), 2);
-        assert_eq!(result.1, "sync-final");
+        assert_eq!(result.1.as_deref(), Some("sync-final"));
         assert!(result.0[1].all_day);
         assert_eq!(result.0[1].recurrence, vec!["RRULE:FREQ=WEEKLY"]);
     }

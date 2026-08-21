@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const INTENT_SCHEMA_VERSION: &str = "kyra.intent.v1";
-pub const PROMPT_VERSION: &str = "kyra.prompt.v1";
+pub const PROMPT_VERSION: &str = "kyra.prompt.v4";
 pub const POLICY_VERSION: &str = "kyra.policy.v1";
 pub const REDACTION_VERSION: &str = "kyra.redaction.v1";
 
@@ -62,7 +62,11 @@ pub struct AiCommandInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum AiCommandResult {
     Executed {
         action_ids: Vec<String>,
@@ -336,6 +340,7 @@ pub struct ActivationReport {
     pub unauthorized_actions: usize,
     pub ambiguous_calendar_actions: usize,
     pub max_latency_ms: i64,
+    pub failed_cases: Vec<String>,
     pub passed: bool,
 }
 
@@ -367,4 +372,28 @@ pub struct CanonicalDocument {
     pub span_map: Vec<SpanMap>,
     pub source_revision_ids: Vec<String>,
     pub person_ids: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_results_serialize_variant_fields_for_the_frontend() {
+        let executed = serde_json::to_value(AiCommandResult::Executed {
+            action_ids: vec!["action-1".to_owned()],
+        })
+        .unwrap();
+        let clarification = serde_json::to_value(AiCommandResult::ClarificationRequired {
+            session_id: "session-1".to_owned(),
+            question: "When?".to_owned(),
+            expires_at: "2026-08-22T00:00:00Z".to_owned(),
+        })
+        .unwrap();
+
+        assert_eq!(executed["actionIds"][0], "action-1");
+        assert!(executed.get("action_ids").is_none());
+        assert_eq!(clarification["sessionId"], "session-1");
+        assert_eq!(clarification["expiresAt"], "2026-08-22T00:00:00Z");
+    }
 }

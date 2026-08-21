@@ -1,5 +1,6 @@
 pub mod ai;
 mod commands;
+mod credential_store;
 mod crypto;
 mod db;
 mod google;

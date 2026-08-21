@@ -191,6 +191,32 @@ pub fn quote_hash(quote: &str) -> String {
     sha256_hex(quote.as_bytes())
 }
 
+pub fn evidence_anchor_catalog(document: &CanonicalDocument) -> String {
+    document
+        .span_map
+        .iter()
+        .filter_map(|span| {
+            if span.transformed_start >= span.transformed_end
+                || span.transformed_end > document.text.len()
+                || !document.text.is_char_boundary(span.transformed_start)
+                || !document.text.is_char_boundary(span.transformed_end)
+            {
+                return None;
+            }
+            let quote = &document.text[span.transformed_start..span.transformed_end];
+            serde_json::to_string(&super::types::EvidenceReference {
+                source_revision_id: span.source_revision_id.clone(),
+                document_hash: document.document_hash.clone(),
+                start_offset: span.transformed_start,
+                end_offset: span.transformed_end,
+                quote_hash: quote_hash(quote),
+            })
+            .ok()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
@@ -362,5 +388,18 @@ mod tests {
             schema["properties"]["proposals"]["items"]["additionalProperties"],
             false
         );
+    }
+
+    #[test]
+    fn evidence_catalog_contains_copyable_valid_anchors() {
+        let (document, _) = context();
+        let catalog = evidence_anchor_catalog(&document);
+        let anchor: EvidenceReference = serde_json::from_str(&catalog).unwrap();
+        let quote = &document.text[anchor.start_offset..anchor.end_offset];
+
+        assert_eq!(anchor.source_revision_id, "r1");
+        assert_eq!(anchor.document_hash, document.document_hash);
+        assert_eq!(anchor.quote_hash, quote_hash(quote));
+        assert_eq!(quote, "Please send the report tomorrow.");
     }
 }
